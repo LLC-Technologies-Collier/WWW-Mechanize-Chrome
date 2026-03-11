@@ -336,6 +336,16 @@ sub connect( $self, %args ) {
             $s->attach( $s->tab->{targetId});
         });
 
+    } elsif( defined $args{ tab } and $args{ tab } eq 'current' ) {
+        $done = $done->then(sub {
+            $s->getTargets()
+        })->then(sub( @tabs ) {
+            (my $tab) = grep { $_->{type} eq 'page' && $_->{targetId} && $_->{attached} } @tabs;
+            ($tab) ||= grep { $_->{type} eq 'page' && $_->{targetId} } @tabs;
+            $s->tab($tab);
+            $s->attach( $tab->{targetId} )
+        });
+
     } elsif( defined $args{ tab } and $args{ tab } =~ /^\d{1,5}$/ ) {
         $done = $done->then(sub {
             $s->getTargets()
@@ -731,8 +741,10 @@ Brings the tab to the foreground of the application
 
 =cut
 
-sub activate_tab( $self, $tab ) {
-    croak "Won't activate tabs, even though I could";
+sub activate_tab( $self, $tab=undef ) {
+    my $id = ref $tab ? $tab->{targetId} : $tab;
+    $id ||= $self->targetId;
+    $self->transport->send_message('Target.activateTarget', targetId => $id );
 };
 
 =head2 C<< $target->getTargetInfo >>

@@ -733,7 +733,13 @@ This method is special to WWW::Mechanize::Chrome.
 
 ## `->autoclose_tab`
 
-Set the `autoclose` option
+Set the `autoclose_tab` option
+
+## `->close`
+
+    $mech->close()
+
+Tear down all connections and shut down Chrome.
 
 ## `->close`
 
