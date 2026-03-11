@@ -71,6 +71,7 @@
       },
       "test" : {
          "requires" : {
+            "Capture::Tiny" : "0",
             "Data::Dump" : "0",
             "Data::Dumper" : "0",
             "Image::Info" : "0",
