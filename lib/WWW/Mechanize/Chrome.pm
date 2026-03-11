@@ -961,6 +961,10 @@ sub new_future($class, %options) {
         $options{ autoclose } = 1
     };
 
+    if (! exists $options{ autoclose_tab }) {
+        $options{ autoclose_tab } = $options{ autoclose }
+    };
+
     if( ! exists $options{ frames }) {
         $options{ frames }= 1;
     };
@@ -992,7 +996,7 @@ sub new_future($class, %options) {
     $options{ existing_tab } ||= defined $options{ tab };
 
     if( $options{ tab } and $options{ tab } eq 'current' ) {
-        $options{ tab } = 0; # use tab at index 0
+        # We will let Target.pm handle 'current' by looking for 'attached' or 'focused'
     };
 
     # Find out what connection style we need/the user wants
@@ -1252,7 +1256,9 @@ sub _connect( $self, %options ) {
             # ->get() doesn't have ->get_future() yet
             if( ! (exists $options{ tab } )) {
                 $s->get($options{ start_url }); # Reset to clean state, also initialize our frame id
-            };
+            } elsif( $options{ tab } and $options{ tab } eq 'current' ) {
+                # If we're reusing a tab, wait for it to have content?
+                # Or at least give it a moment to stabilize if it was just activated
 
             $s->{_fresh_document} = $s->add_listener('DOM.documentUpdated', sub {
                 $s->{_currentNodeGeneration}++;
@@ -2050,12 +2056,12 @@ sub agent( $self, $ua ) {
 
 =head2 C<< ->autoclose_tab >>
 
-Set the C<autoclose> option
+Set the `autoclose_tab` option
 
 =cut
 
-sub autoclose_tab( $self, $autoclose ) {
-    $self->{autoclose} = $autoclose
+sub autoclose_tab( $self, $autoclose_tab ) {
+    $self->{autoclose_tab} = $autoclose_tab
 }
 
 =head2 C<< ->close >>
@@ -2072,13 +2078,21 @@ sub close {
     #if( $_[0]->{autoclose} and $_[0]->tab and my $tab_id = $_[0]->tab->{id} ) {
     #    $_[0]->target->close_tab({ id => $tab_id })->get();
     #};
-    if( $_[0]->{autoclose} and $_[0]->target and $_[0]->tab  ) {
+    if( $_[0]->{autoclose_tab} and $_[0]->target and $_[0]->tab  ) {
         my $c = $_[0]->target->close;
         $c->set_label('close()');
         if( ${^GLOBAL_PHASE} eq 'DESTRUCT' ) {
             $c->retain();
         } else {
-            $c->get; # just to see if there is an error
+            eval {
+                local $SIG{ALRM} = sub { die "Timeout" };
+                alarm(1);
+                $c->get;
+                alarm(0);
+            };
+            if( $@ && $@ =~ /Timeout/ ) {
+                warn "Tab closure timed out";
+            }
         }
     };
 

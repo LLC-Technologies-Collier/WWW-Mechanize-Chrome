@@ -9,7 +9,7 @@ use Carp qw(croak);
 use File::Temp 'tempdir';
 use WWW::Mechanize::Chrome;
 use Config;
-use Time::HiRes 'sleep';
+use Time::HiRes qw(sleep time);
 use POSIX qw(:sys_wait_h);
 
 use Log::Log4perl ':easy';
@@ -39,25 +39,29 @@ our %all_spawned_pids;
     # modern Chromium versions that may not exit promptly on SIGTERM.
     *WWW::Mechanize::Chrome::kill_child = sub {
         my ($self, $signal, $pids, $wait_file) = @_;
-        return unless $pids && ref $pids eq 'ARRAY';
+        return unless $pids;
 
-        for my $pid (@$pids) {
+        my @p = ref $pids eq 'ARRAY' ? @$pids : ($pids);
+
+        for my $pid (@p) {
             next unless $pid && kill(0, $pid);
 
             # Use SIGKILL in tests to ensure swift termination and avoid hangs
             kill('KILL', $pid);
 
             # Non-blocking wait with a short timeout
-            my $timeout = time + 2;
-            while (time < $timeout) {
+            my $timeout = Time::HiRes::time() + 2;
+            while (Time::HiRes::time() < $timeout) {
                 my $res = waitpid($pid, WNOHANG);
                 last if $res == -1 || $res == $pid;
-                sleep 0.1;
+                Time::HiRes::sleep(0.1);
             }
+
             delete $all_spawned_pids{$pid};
         }
         return;
     };
+
 }
 
 END {
