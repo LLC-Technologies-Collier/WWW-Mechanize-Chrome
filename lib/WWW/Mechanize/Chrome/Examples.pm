@@ -55,6 +55,7 @@ The following is a list of the 5 example programs that are included in the WWW::
 
 =head2 Example: url-to-image.pl
 
+    #!/usr/bin/perl
     use strict;
     use File::Spec;
     use File::Basename 'dirname';
@@ -137,6 +138,7 @@ Download this example: L<https://metacpan.org/release/CORION/WWW-Mechanize-Chrom
 
 =head2 Example: dump-links.pl
 
+    #!/usr/bin/perl
     use strict;
     use Log::Log4perl qw(:easy);
     use WWW::Mechanize::Chrome;
