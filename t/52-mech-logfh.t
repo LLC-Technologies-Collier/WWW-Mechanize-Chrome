@@ -8,6 +8,7 @@ Log::Log4perl->easy_init($ERROR);  # Set priority of root logger to ERROR
 
 use lib '.';
 use t::helper;
+use Capture::Tiny 'capture';
 
 # What instances of Chrome will we try?
 my @instances = t::helper::browser_instances();
@@ -36,16 +37,18 @@ sub new_mech {
     @_,);
 };
 
-t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
-    my( $file, $mech ) = splice @_; # so we move references
-    isa_ok $mech, 'WWW::Mechanize::Chrome';
-    my $info = $mech->driver->createTarget()->get;
-    my $targetId = $mech->driver->targetId; # this one should close once we discard it
+capture {
+    t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
+        my( $file, $mech ) = splice @_; # so we move references
+        isa_ok $mech, 'WWW::Mechanize::Chrome';
+        my $info = $mech->driver->createTarget()->get;
+        my $targetId = $mech->driver->targetId; # this one should close once we discard it
 
-    undef $mech;
+        undef $mech;
 
-    ok -f $fn, "JSON logfile exists";
-    ok -s $fn, "We wrote something into the logfile";
-});
+        ok -f $fn, "JSON logfile exists";
+        ok -s $fn, "We wrote something into the logfile";
+    });
+};
 
 unlink $fn;
