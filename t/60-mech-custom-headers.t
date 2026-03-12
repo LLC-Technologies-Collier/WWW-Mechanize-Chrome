@@ -86,8 +86,8 @@ t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
 
     $mech->agent( $ua );
 
-    diag "Using Referer: $ref" if $ref;
-    diag "Using Host: $host[1]" if @host;
+    note "Using Referer: $ref" if $ref;
+    note "Using Host: $host[1]" if @host;
 
     $res = $mech->get($site);
     isa_ok $res, 'HTTP::Response', "Response";
