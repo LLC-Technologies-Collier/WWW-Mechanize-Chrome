@@ -733,7 +733,7 @@ This method is special to WWW::Mechanize::Chrome.
 
 ## `->autoclose_tab`
 
-Set the `autoclose` option
+Set the \`autoclose\_tab\` option
 
 ## `->close`
 
