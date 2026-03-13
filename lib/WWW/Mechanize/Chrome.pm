@@ -1259,6 +1259,7 @@ sub _connect( $self, %options ) {
             } elsif( $options{ tab } and $options{ tab } eq 'current' ) {
                 # If we're reusing a tab, wait for it to have content?
                 # Or at least give it a moment to stabilize if it was just activated
+            }
 
             $s->{_fresh_document} = $s->add_listener('DOM.documentUpdated', sub {
                 $s->{_currentNodeGeneration}++;
