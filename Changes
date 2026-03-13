@@ -44,7 +44,7 @@
     * Tested against Chromium Chromium/111.0.5563.65
     * Tested against Chromium Chromium/112.0.5615.121
 
-0.76 to-be-released
+0.76 2026-03-13
     * Harden test suite against Chromium process leaks and hangs by
       implementing aggressive SIGKILL cleanup and global PID tracking in
       t/helper.pm.
@@ -64,6 +64,7 @@
     * Fix typos in README.mkdn and add missing shebangs to code examples.
     * These contributions are copyright Google LLC and contributors 2026
       This work is licensed under the same terms as Perl itself.
+
 0.75 2025-10-31
     * When encountering bad/unknown Chrome behaviour, return error 599 instead
       of crashing the script using C<die> or C<croak>.
