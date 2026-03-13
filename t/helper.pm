@@ -148,10 +148,10 @@ sub default_unavailable {
 
 sub runtests {
     my ($browser_instance, $new_mech, $code, $test_count) = @_;
-    if ($browser_instance) {
-        note sprintf 'Testing with %s',
-            $browser_instance;
-    };
+    #if ($browser_instance) {
+    #    note sprintf 'Testing with %s',
+    #        $browser_instance;
+    #};
     my $tempdir = tempdir( CLEANUP => 1 );
     my @launch;
     if( $ENV{TEST_WWW_MECHANIZE_CHROME_INSTANCE} ) {
