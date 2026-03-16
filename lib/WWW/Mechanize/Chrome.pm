@@ -30,7 +30,7 @@ use Time::HiRes ();
 use Encode 'encode';
 use Text::ParseWords 'shellwords';
 
-our $VERSION = '0.76';
+our $VERSION = '0.77';
 our @CARP_NOT;
 
 # We don't yet inherit from Moo 2, so patch up things manually
@@ -6148,13 +6148,14 @@ sub _saveResourceTree( $self, $tree, $names, $seen, $wanted, $save, $base_dir ) 
         # Also something like get_page_resources, that returns the linear
         # list of resources for all frames etc.
         my @wanted;
-        for my $res ($tree->{frame}, @{ $tree->{resources}}) {
+        for my $res ($tree->{frame}, @{ $tree->{resources} || [] }) {
+            next if ! $res or ! $res->{url};
             if( $seen->{ $res->{url} } ) {
                 #warn "Skipping $res->{url} (already saved)";
                 next;
             };
-            if( !$wanted->($res) ) {
-                #warn "Don't want $res->{url}";
+            if( !$wanted->($res) and $res->{url} ne $self->uri ) {
+                # Only skip if not wanted AND not the main page
                 next;
             };
             #warn "Do want $res->{url}";
@@ -6184,12 +6185,42 @@ sub _saveResourceTree( $self, $tree, $names, $seen, $wanted, $save, $base_dir ) 
 
         # retrieve and save the resource content for each resource
         for my $res (@wanted) {
-            my $fetch = $self->getResourceContent_future( $res );
+            my $fetch = $self->getResourceContent_future( $res )->else(sub {
+                my $err = "@_";
+                if( $res->{mimeType} =~ /html/i ) {
+                    # Fallback to DOM serialization for HTML resources.
+                    # This is useful when the cache is missing (file:// on v146+)
+                    # or if the network fetch failed but the DOM is still there.
+                    return $self->_cached_document->then(sub( $root ) {
+                        my @content = map {
+                            my $nodeId = $_->{nodeId};
+                            $self->target->send_message('DOM.getOuterHTML', nodeId => 0+$nodeId )
+                        } @{ $root->{root}->{children} || [] };
+
+                        return Future->wait_all( @content )
+                        ->then( sub( @outerHTML_f ) {
+                            return Future->done({
+                                %$res,
+                                content => (join "", map { $_->get->{outerHTML} } @outerHTML_f),
+                                _utf8 => 1,
+                            });
+                        });
+                    });
+                };
+                return Future->fail(@_);
+            });
+
             if( $save ) {
                 #warn "Will save $res->{url}";
                 $fetch = $fetch->then( $save )->else(sub {
-                    warn "Fetch failed:";
-                    warn "@_";
+                    my $err = "@_";
+                    if( $err =~ /Resource was not cached/i and $res->{url} =~ /^file:/ ) {
+                        # Local file:// resources are known to be flaky in headless Chromium caches
+                        warn "Could not save local resource $res->{url}: Resource was not cached\n";
+                        return Future->done();
+                    }
+                    # For all other failures, or non-file cache misses, propagate the error
+                    return Future->fail(@_);
                 });
             };
             push @requested, $fetch;
@@ -6213,7 +6244,7 @@ sub fetchResources_future( $self, %options ) {
     $options{ seen } ||= {};
     $options{ names } ||= {};
     $options{ target_dir } ||= '.';
-    $options{ wanted } ||= sub( $res ) { $res->{url} =~ /^(https?):/i };
+    $options{ wanted } ||= sub( $res ) { $res->{url} =~ /^(https?|file):/i };
     my $seen = $options{ seen };
     my $names = $options{ names };
     my $wanted = $options{ wanted };
@@ -6301,6 +6332,10 @@ sub filenameFromUrl( $self, $url, $extension ) {
     $target =~ s!.*[/\\]!!;
 
     # Add/change extension here
+
+    if( length $target > 240 ) {
+        $target = substr( $target, 0, 240 );
+    }
 
     return $target
 }
