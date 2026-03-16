@@ -45,7 +45,9 @@
     * Tested against Chromium Chromium/112.0.5615.121
 
 0.77 2026-03-16
-    * Support Fedora 43 and Chromium v146+.
+    * Support Fedora 43, CentOS Stream 10, and Chromium v146+.
+    * Improve browser discovery on Linux: search for 'headless_shell' and
+      include common RHEL/CentOS paths (/usr/lib64/chromium-browser).
     * Implement DOM serialization fallback in _saveResourceTree for HTML
       resources when Page.getResourceContent fails (fixes "Resource was
       not cached" errors in modern headless Chromium).
@@ -57,6 +59,8 @@
     * Refine saveResources error handling to be scheme-aware: report
       file:// cache misses as warnings while maintaining strict error
       propagation for HTTP/HTTPS.
+    * Stabilize t/51-mech-links.t by adding a short wait (0.25s) for DOM
+      stabilization after loading pages with iframes.
 
 0.76 2026-03-13
     * Harden test suite against Chromium process leaks and hangs by

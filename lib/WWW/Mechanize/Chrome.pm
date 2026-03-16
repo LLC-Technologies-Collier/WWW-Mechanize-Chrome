@@ -666,7 +666,7 @@ sub default_executable_names( $class, @other ) {
         push @program_names,
           $^O =~ /mswin/i ? 'chrome.exe'
         : $^O =~ /darwin/i ? ('Google Chrome', 'Chromium')
-        : ('google-chrome', 'chromium-browser', 'chromium')
+        : ('google-chrome', 'chromium-browser', 'chromium', 'headless_shell')
     };
     @program_names
 }
@@ -692,6 +692,11 @@ sub additional_executable_search_directories( $class, $os_style=$^O ) {
                     $path,
                     $ENV{"HOME"} . "/$path";
         };
+    } else {
+        push @search, grep { -d $_ } (
+            '/usr/lib64/chromium-browser',
+            '/usr/lib/chromium-browser',
+        );
     }
     @search
 }
