@@ -13,6 +13,8 @@ Log::Log4perl->easy_init($ERROR);  # Set priority of root logger to ERROR
 #Log::Log4perl->easy_init($TRACE)
 #    if $^O =~ /darwin/i;
 
+t::helper::set_watchdog(45);
+
 # What instances of Chrome will we try?
 my @instances = t::helper::browser_instances();
 my $testcount = 11;
@@ -31,7 +33,7 @@ sub new_mech {
     );
 };
 
-my $server = Test::HTTP::LocalServer->spawn(
+my $server = t::helper->safe_server(
     #debug => 1,
 );
 
@@ -39,7 +41,7 @@ t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
     my ($browser_instance, $mech) = @_;
     my ($site,$estatus) = ($server->url,200);
 
-    my $res = $mech->get($site);
+    my $res = t::helper::safe_get($mech, $site);
 
     for( 1..10 ) {
         my @input = t::helper::safe_xpath($mech, '//input[@name="q"]', all => 1);
