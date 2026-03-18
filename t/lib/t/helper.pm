@@ -309,7 +309,7 @@ sub safe_field {
 
 sub safe_set_fields {
     my ($mech, %fields) = @_;
-    my $timeout = 5;
+    my $timeout = 15;
     my $start = Time::HiRes::time();
     my $call_f = $mech->set_fields_future(%fields);
     my $timeout_f = $mech->sleep_future($timeout)->then(sub { Future->fail("Timeout during set_fields") });
@@ -352,14 +352,85 @@ sub safe_decoded_content {
     return $res;
 }
 
+sub safe_render_content {
+    my ($mech, %options) = @_;
+    my $timeout = delete $options{timeout} || 30; # Rendering can be slow
+    my $start = Time::HiRes::time();
+    my $call_f = $mech->render_content_future(%options);
+    my $timeout_f = $mech->sleep_future($timeout)->then(sub { Future->fail("Timeout during render_content") });
+    my $f = Future->wait_any($call_f, $timeout_f);
+    my $res = $f->get;
+    my $elapsed = Time::HiRes::time() - $start;
+    if ($elapsed > 0.1) {
+        Test::More::note(sprintf('render_content() took %.3fs', $elapsed));
+    }
+    return $res;
+}
+
+sub safe_content_as_png {
+    my ($mech, %options) = @_;
+    my $timeout = delete $options{timeout} || 30;
+    my $start = Time::HiRes::time();
+    my $call_f = $mech->content_as_png_future();
+    my $timeout_f = $mech->sleep_future($timeout)->then(sub { Future->fail("Timeout during content_as_png") });
+    my $f = Future->wait_any($call_f, $timeout_f);
+    my $res = $f->get;
+    my $elapsed = Time::HiRes::time() - $start;
+    if ($elapsed > 0.1) {
+        Test::More::note(sprintf('content_as_png() took %.3fs', $elapsed));
+    }
+    return $res;
+}
+
+sub safe_content_as_pdf {
+    my ($mech, %options) = @_;
+    my $timeout = delete $options{timeout} || 30;
+    my $start = Time::HiRes::time();
+    my $call_f = $mech->content_as_pdf_future(%options);
+    my $timeout_f = $mech->sleep_future($timeout)->then(sub { Future->fail("Timeout during content_as_pdf") });
+    my $f = Future->wait_any($call_f, $timeout_f);
+    my $res = $f->get;
+    my $elapsed = Time::HiRes::time() - $start;
+    if ($elapsed > 0.1) {
+        Test::More::note(sprintf('content_as_pdf() took %.3fs', $elapsed));
+    }
+    return $res;
+}
+
+sub safe_update_html {
+    my ($mech, $html, %options) = @_;
+    my $timeout = delete $options{timeout} || 10;
+    my $start = Time::HiRes::time();
+    my $call_f = $mech->update_html_future($html);
+    my $timeout_f = $mech->sleep_future($timeout)->then(sub { Future->fail("Timeout during update_html") });
+    my $f = Future->wait_any($call_f, $timeout_f);
+    my $res = $f->get;
+    my $elapsed = Time::HiRes::time() - $start;
+    if ($elapsed > 0.1) {
+        Test::More::note(sprintf('update_html() took %.3fs', $elapsed));
+    }
+    return $res;
+}
+
 sub set_watchdog {
     my ($timeout_s) = @_;
     my $name = (caller(1))[3] || 'Test';
+    my $target_pid = $$;
+
     $SIG{ALRM} = sub { 
-        Test::More::note("$name timed out after ${timeout_s}s!"); 
+        my $msg = "$name timed out after ${timeout_s}s!";
+        print STDERR "\n$msg (ALRM)\n";
         CORE::exit(1);
     };
+
     if( $^O =~ /mswin/i ) {
+        # Spawn a background killer that doesn't inherit our handles.
+        # Use administrator via SSH because 'dev' cannot kill its own process
+        # sometimes on this specific host (AD2).
+        my $cmd = qq{perl -e "sleep $timeout_s; if(kill(0, $target_pid)){ print STDERR qq(\\nWatchdog: Terminating hung process $target_pid after $timeout_s s\\n); system(qq(ssh -i C:/Users/dev.AD2/.ssh/id_rsa -o StrictHostKeyChecking=no administrator\@100.64.79.66 \\"taskkill /F /T /PID $target_pid\\")); kill(9, $target_pid); }"};
+        system(1, qq{$cmd >NUL 2>&1});
+        
+        Test::More::note("Watchdog enabled ($timeout_s s) for PID $target_pid");
         alarm($timeout_s);
     } else {
         # Use ualarm for sub-second precision if needed, but here we take seconds

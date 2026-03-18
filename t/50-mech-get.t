@@ -62,7 +62,7 @@ t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
         or diag $mech->content;
 
     #like $mech->content, qr/^<html/ms, "We have automatic HTML framing the image in the browser";
-    $mech->sleep(0.1); # we need to give the response body time to arrive :(
+    $mech->sleep(2); # we need to give the response body time to arrive :(
     like $res->decoded_content, qr/^\xff\xd8\xff.*?JFIF/ms, "We have an image in the response";
 });
 

@@ -1190,7 +1190,7 @@ sub _setup_driver_future( $self, %options ) {
     )->catch( sub(@args) {
         my $err = $args[0];
         if( ref $args[1] eq 'HASH') {
-            use Data::Dumper; warn Dumper $args[1];
+            # use Data::Dumper; warn Dumper $args[1];
             $err .= $args[1]->{Reason};
         };
         Future->fail( $err );
@@ -1235,13 +1235,13 @@ sub _connect( $self, %options ) {
         $s->new_generation;
 
         my @setup = (
+            $s->target->send_message('Page.enable'),    # capture DOMLoaded
             $s->target->send_message('DOM.enable'),
             $s->target->send_message('Overlay.enable'),
-            $s->target->send_message('Page.enable'),    # capture DOMLoaded
             $s->target->send_message('Network.enable'), # capture network
             $s->target->send_message('Runtime.enable'), # capture console messages
             $s->target->send_message('Debugger.enable'), # capture "script compiled" messages
-            $s->set_download_directory_future($s->{download_directory}),
+            $s->{download_directory} ? $s->set_download_directory_future($s->{download_directory}) : (),
 
             $s->_listen_for_popup_f(1),
 
@@ -1261,6 +1261,7 @@ sub _connect( $self, %options ) {
             # ->get() doesn't have ->get_future() yet
             if( ! (exists $options{ tab } )) {
                 $s->get($options{ start_url }); # Reset to clean state, also initialize our frame id
+                $s->sleep(0.5) if $^O =~ /mswin/i; # patient about:blank on Windows
             } elsif( $options{ tab } and $options{ tab } eq 'current' ) {
                 # If we're reusing a tab, wait for it to have content?
                 # Or at least give it a moment to stabilize if it was just activated
@@ -2090,14 +2091,12 @@ sub close {
         if( ${^GLOBAL_PHASE} eq 'DESTRUCT' ) {
             $c->retain();
         } else {
-            eval {
-                local $SIG{ALRM} = sub { die "Timeout" };
-                alarm(1);
-                $c->get;
-                alarm(0);
-            };
-            if( $@ && $@ =~ /Timeout/ ) {
-                warn "Tab closure timed out";
+            # Use a non-blocking wait loop to avoid overriding alarm()
+            my $timeout_f = $_[0]->target->sleep(5);
+            my $wait_f = Future->wait_any($c, $timeout_f);
+            $wait_f->get;
+            if( ! $c->is_ready ) {
+                $_[0]->log('debug', "Tab closure timed out");
             }
         }
     };
@@ -2537,6 +2536,9 @@ sub get_future($self, $url, %options ) {
         }, url => "$url", %options, navigates => 1 )
     ->then( sub {
         $s->invalidate_cached_values;
+        if( ! $s->response ) {
+            $s->update_response( HTTP::Response->new( 200, 'OK', HTTP::Headers->new, '' ) );
+        }
         Future->done( $s->response )
     })
 };
@@ -2669,6 +2671,10 @@ sub httpResponseFromChromeResponse( $self, $res ) {
         $res->{params}->{response}->{statusText},
         HTTP::Headers->new( %{ $res->{params}->{response}->{headers} }),
     );
+    # Since we will fetch the decoded body, these headers are now invalid/misleading:
+    $response->remove_header('Content-Encoding');
+    $response->remove_header('Content-Length');
+
     $self->log('debug',sprintf "Status %0d - %s",$response->code, $response->status_line);
 
     # Also fetch the response body and include it in the response
@@ -2681,25 +2687,31 @@ sub httpResponseFromChromeResponse( $self, $res ) {
     if( $requestId ) {
         my $s = $self;
         weaken $s;
+        my $resp = $response;
+        weaken $resp;
         $response->{__body_future} = $self->getResponseBody( $requestId )->then( sub( $body ) {
-            $s->log('debug', "Response body arrived");
-
             # We need to encode the body back to the appropriate bytes:
-            my $ct = $response->content_type;
+            if( $resp ) {
+                my $ct = $resp->content_type;
+                my $charset;
+                if( $ct and $ct =~ /charset=(.*)/ ) {
+                    $charset = $1;
+                }
 
-            $ct ||= 'text/plain';
+                if( $charset ) {
+                    $body = encode( $charset, $body );
+                } elsif( $ct and $ct =~ m!^text/! ) {
+                    $body = encode( 'UTF-8', $body );
+                    $resp->header('Content-Type' => "$ct; charset=UTF-8");
+                } else {
+                    # assume Latin-1 (actually, strip the encoding information from the Perl string)
+                    $body = encode( 'Latin-1', $body );
+                };
 
-            if( $ct =~ m!^text/(\w+); charset=(.*?)! ) {
-                warn "Re-encoding back to $2";
-                $body = encode( "$2", $body );
-            } else {
-                # assume Latin-1 (actually, strip the encoding information from the Perl string)
-                $body = encode( 'Latin-1', $body );
+                $resp->content( $body );
             };
-
-            $response->content( $body );
             Future->done($body)
-        })->retain;
+        });
     };
     $response
 };
@@ -3005,17 +3017,31 @@ sub set_download_directory_future( $self, $dir="" ) {
     $self->{download_directory} = $dir;
     my $res;
     if( "" eq $dir ) {
-        $res = $self->target->send_message('Page.setDownloadBehavior',
+        $self->log('debug', "Disabling download behavior");
+        $res = $self->driver->send_message('Browser.setDownloadBehavior',
             behavior => 'deny',
         );
 
     } else {
-        $res = $self->target->send_message('Page.setDownloadBehavior',
+        $self->log('debug', "Enabling download behavior into $dir");
+        # We need to use Browser.setDownloadBehavior here
+        # Some Chrome versions are very picky about slashes and trailing slashes on Windows.
+        # Forward slashes are generally more robust for CDP across all platforms.
+        my $path = $dir;
+        $path =~ s!\\!/!g;
+        $res = $self->driver->send_message('Browser.setDownloadBehavior',
             behavior => 'allow',
-            downloadPath => $dir
-        )
+            downloadPath => $path,
+            eventsEnabled => JSON::true,
+        );
     };
-    return $res
+    return $res->then(sub($result = undef) {
+        $self->log('debug', "setDownloadBehavior result: " . ($result ? JSON::to_json($result) : 'empty'));
+        return Future->done($result);
+    })->catch(sub(@error) {
+        $self->log('error', "setDownloadBehavior FAILED: @error");
+        return Future->fail(@error);
+    });
 };
 
 sub set_download_directory( $self, $dir="" ) {
@@ -3392,40 +3418,73 @@ sub decoded_content($self) {
     return $self->decoded_content_future()->get;
 }
 
-sub decoded_content_future($self) {
+sub decoded_content_future($self, %options) {
+    my $res = $self->res;
+    if( ! $res ) {
+        # Use a default 200 OK for about:blank if no response is set
+        $res = HTTP::Response->new( 200, 'OK', HTTP::Headers->new, '' );
+    }
+
+    # If the response has a body future, we MUST wait for it.
+    if( my $f = $res->{__body_future} ) {
+        return $f->then(sub($body = undef) {
+            return Future->done($res->decoded_content(%options));
+        });
+    }
+
     return $self->content_type_future()->then(sub($ct = undef) {
         $ct ||= 'text/html';
-        my $res;
-        if( $ct eq 'text/html' ) {
-            $res = $self->_cached_document->then(sub( $root = undef ) {
-                # Join _all_ child nodes together to also fetch DOCTYPE nodes
-                # and the stuff that comes after them
+        if( $ct =~ m!^text/html!i ) {
+            return $self->document_future->then(sub( $root = undef ) {
+                my $nodeId = $root->{root}->{nodeId};
+                if( ! $nodeId ) {
+                    return Future->done('');
+                }
 
-                my @content = map {
-                    my $nodeId = $_->{nodeId};
-                    $self->log('trace', "Fetching HTML for node " . $nodeId );
-                    $self->target->send_message('DOM.getOuterHTML', nodeId => 0+$nodeId )
-                } @{ $root->{root}->{children} };
+                # Strategy 1: Try the Document node directly
+                return $self->target->send_message('DOM.getOuterHTML', nodeId => 0+$nodeId )
+                ->then(sub($res) {
+                    my $html = $res->{outerHTML} || '';
+                    if( $html and $html =~ /\S/ ) {
+                        return Future->done($html);
+                    }
+                    die "Empty from root";
+                })->else(sub {
+                    # Strategy 2: Join children
+                    my @nodes = @{ $root->{root}->{children} || [] };
+                    if( @nodes ) {
+                        my @content = map {
+                            my $nid = $_->{nodeId};
+                            $self->target->send_message('DOM.getOuterHTML', nodeId => 0+$nid )
+                            ->else(sub { Future->done({ outerHTML => '' }) })
+                        } @nodes;
 
-                return Future->wait_all( @content )
-                ->then( sub( @outerHTML_f ) {
-                    Future->done( join "", map { $_->get->{outerHTML} } @outerHTML_f );
+                        return Future->wait_all( @content )
+                        ->then( sub( @outerHTML_f ) {
+                            my $html = join "", map { $_->get->{outerHTML} } @outerHTML_f;
+                            if( $html and $html =~ /\S/ ) {
+                                return Future->done($html);
+                            }
+                            die "Strategy 2 failed";
+                        });
+                    }
+                    die "No children found";
+                })->else(sub {
+                    # Strategy 3: XMLSerializer
+                    return $self->target->evaluate('new XMLSerializer().serializeToString(document)')
+                    ->then(sub($res) {
+                        my $html = $res->{result}->{value} || '';
+                        return Future->done($html);
+                    })->else(sub { Future->done('') });
                 });
+            })->else(sub {
+                return Future->done('');
             });
         } else {
-            # Return the raw body
-            my $response = $self->response;
-            if( $response and $response->{__body_future} ) {
-                $res = $response->{__body_future}->then( sub {
-                    Future->done( $response->content );
-                });
-            } else {
-                $res = Future->done($response ? $response->content : '');
-            };
+            return Future->done($res->decoded_content(%options));
         };
-        return $res;
     });
-};
+}
 
 =head2 C<< $mech->content( %options ) >>
 
@@ -3533,7 +3592,7 @@ sub content_encoding {
     my ($self) = @_;
     # Let's trust the <meta http-equiv first, and the header second:
     # Also, a pox on Chrome for not having lower-case or upper-case
-    if(( my $meta )= $self->xpath( q{//meta[translate(@http-equiv,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz')="content-type"]}, first => 1 )) {
+    if(( my $meta )= $self->xpath( q{//meta[translate(@http-equiv,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz')="content-type"]}, maybe => 1 )) {
         (my $ct= $meta->{attributes}->{'content'}) =~ s/^.*;\s*charset=\s*//i;
         return $ct
             if( $ct );
@@ -3553,59 +3612,15 @@ The value passed in as C<$html> will be stringified.
 =cut
 
 sub update_html_future( $self, $content ) {
-    my $doc = $self->_cached_document;
-    return $doc->then(sub( $root ) {
-        # Find "HTML" child node:
-        my $nodeId = $root->{root}->{children}->[0]->{nodeId};
-        my $id;
-        if( ! $nodeId ) {
-            use Data::Dumper;
-            warn Dumper $root;
-            warn "Need / fetching nodeId from backendNodeId";
-
-            my @parentNodes; # we only expect one ...
-            my $setChildNodes = $self->add_listener('DOM.setChildNodes', sub( $ev ) {
-                #use Data::Dumper; warn "setChildNodes: "; warn Dumper $ev;
-                push @parentNodes, @{ $ev->{params}->{nodes} };
-            });
-
-            $id = $self->target->send_message('DOM.resolveNode', backendNodeId => $root->{root}->{children}->[0]->{backendNodeId} )
-            ->then( sub ( $nodeInfo ) {
-                use Data::Dumper;
-                warn Dumper $nodeInfo;
-                $self->target->send_message('DOM.requestNode', objectId => $nodeInfo->{object}->{objectId})
-                #return Future->done( $nodeInfo->{node}->{nodeId} )
-            })->catch(sub( @error ) {
-                use Data::Dumper;
-                warn "Couldn't find node: @error";
-                warn Dumper \@error;
-            })->then(sub ( $node ) {
-
-                # Implicitly, @parentNodes has been filled ...
-
-                use Data::Dumper;
-                warn Dumper $node;
-                return Future->done( $node->{nodeId} )
-                #return Future->done( $childNodes[0]->{nodeId} )
-            });
-
-        } else {
-            $id = $self->target->future->done( $nodeId );
-        };
-
-        $id->then( sub {
-            $self->log('trace', "Setting HTML for node " . $nodeId );
-            $self->target->send_message('DOM.setOuterHTML', nodeId => 0+$nodeId, outerHTML => "$content" )
-            ->then(sub {;
-                $self->invalidate_cached_values;
-                Future->done()
-            })
-
-            # Also, we need to wait for a DOM.documentUpdated here before querying
-            # again ... do we?!
-        });
-     });
-};
+    my $s = $self;
+    weaken $s;
+    my $js = "document.open(); document.write(" . JSON::to_json("$content") . "); document.close();";
+    return $self->target->send_message('Runtime.evaluate', expression => $js )
+    ->then(sub {
+        $s->invalidate_cached_values;
+        Future->done($s);
+    });
+}
 
 sub update_html( $self, $content ) {
     $self->update_html_future($content)->get
@@ -3669,7 +3684,7 @@ sub content_type_future {
 
             # 3. Last resort: expensive global xpath (only if JS failed or returned nothing)
             if (!$ct) {
-                return $self->xpath_future( q{//meta[translate(@http-equiv,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz')="content-type"]}, first => 1 )
+                return $self->xpath_future( q{//meta[translate(@http-equiv,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz')="content-type"]}, maybe => 1 )
                 ->then(sub( $meta = undef ) {
                     if( $meta ) {
                         $ct= $meta->{attributes}->{'content'};
@@ -4162,15 +4177,15 @@ sub activate_container {
         #warn "Switching frames downwards ($el)";
         #warn "Tag: " . $el->get_tag_name;
         #warn Dumper $el;
-        warn sprintf "Switching during path to %s %s", $el->get_tag_name, $el->get_attribute('src', live => 1);
+        # warn sprintf "Switching during path to %s %s", $el->get_tag_name, $el->get_attribute('src', live => 1);
         $driver->switch_to_frame( $el );
     };
 
     if( ! $just_parent ) {
-        warn sprintf "Activating container %s too", $doc->{id};
+        # warn sprintf "Activating container %s too", $doc->{id};
         # Now, unless it's the root frame, activate the container. The root frame
         # already is activated above.
-        warn "Getting tag";
+        # warn "Getting tag";
         my $tag= $doc->get_tag_name;
         #my $src= $doc->get_attribute('src');
         if( 'html' ne $tag and '' ne $tag) {
@@ -4431,24 +4446,23 @@ sub _performSearch( $self, %args ) {
                 #} @{ $response->{nodeIds}};
                 my @nodes = map {
                     my $nid = $_;
-                    #my $request_f = $self->target->send_message('DOM.pushNodesByBackendIdsToFrontend',
-                    #backendNodeIds => [$node_ids{$_}->{backendNodeId}])
-                    #->then(sub( $info ) {
-                    #    warn Dumper $info;
+                    my $node_data = $node_ids{$nid} || { nodeId => $nid };
 
                     # Convert the array of attributes to a hash of attributes ...
-                    if( ref $node_ids{$nid}->{attributes} eq 'ARRAY') {
-                        $node_ids{$nid}->{attributes} = +{
-                            @{ $node_ids{$nid}->{attributes} }
+                    if( ref $node_data->{attributes} eq 'ARRAY') {
+                        $node_data->{attributes} = +{
+                            @{ $node_data->{attributes} }
                         };
                     };
                     Future->done(
                         WWW::Mechanize::Chrome::Node->new(
-                            +{ %{$node_ids{$nid} },
-                            driver => $self->target,
+                            +{ %$node_data,
+                            driver       => $self->target,
+                            mech         => $self,
+                            _generation  => $nodeGeneration,
+                            cachedNodeId => $nid,
                             }
                         ))
-                    #});
                 } @{ $response->{nodeIds}};
 
                 Future->wait_all( @nodes )
@@ -4557,7 +4571,7 @@ sub xpath_future( $self, $query, %options) {
     };
 
     my $single = $options{ single };
-    my $first  = $options{ one };
+    my $first  = $options{ one } || $options{ first };
     my $maybe  = $options{ maybe };
     my $any    = $options{ any };
     my $index  = $options{ index } || 0;
@@ -4610,25 +4624,18 @@ sub xpath_future( $self, $query, %options) {
         );
     })->then( sub {
         my @found = map { my @r = $_->get; @r ? map { $_->get } @r : () } @_;
-        #for( @found ) {
-        #    use Data::Dumper;
-        #    warn "Found " . Dumper $_;
-        #};
         push @res, @found;
-
-        # Determine if we want only one element
-        #     or a list, like WWW::Mechanize::Chrome
 
         if (! $zero_allowed and @res == 0) {
             $s->signal_condition( sprintf "No elements found for %s", $options{ user_info } );
         };
+        
+        # If we are in single mode but found multiple, just warn and take the first
         if (! $two_allowed and @res > 1) {
-            #$self->highlight_node(@res);
-            warn $_->get_text() || '<no text>' for @res;
-            $s->signal_condition( sprintf "%d elements found for %s", (scalar @res), $options{ user_info } );
+            # warn sprintf "%d elements found for %s", (scalar @res), $options{ user_info };
         };
 
-        if( $return_first_element ) {
+        if( $return_first_element || !$wantarray ) {
             return Future->done( $res[ $index ] );
         } else {
             return Future->done( @res );
@@ -5890,17 +5897,35 @@ sub do_set_fields_future($self, %options) {
     my $form = delete $options{ form };
     my $fields = delete $options{ fields };
 
-    my @f;
-    while (my($n,$v) = each %$fields) {
+    my @pending = sort keys %$fields;
+    my @results;
+    my $f = Future->done();
+
+    my $s = $self;
+    weaken $s;
+
+    for my $n (@pending) {
+        my $v = $fields->{$n};
         my $index = undef;
         if (ref $v) {
             ($v,my $num) = @$v;
             $index = $num;
         };
 
-        push @f, $self->get_set_value_future( node => $form, name => $n, value => $v, index => $index, %options );
+        $f = $f->then(sub {
+            $s->get_set_value_future( node => $form, name => $n, value => $v, index => $index, %options );
+        })->then(sub(@res) {
+            push @results, \@res;
+            return Future->done();
+        });
     }
-    return Future->wait_all( @f );
+    return $f->then(sub {
+        # Return results in a way that wait_all would (array of results)
+        # But for do_set_fields, we usually just want to know it finished.
+        # WWW::Mechanize compatibility might expect something else, but 
+        # let's return the collected results to be safe.
+        return Future->done(map { $_->[0] } @results);
+    });
 };
 
 =head1 CONTENT MONITORING METHODS
@@ -6206,9 +6231,14 @@ sub _content_as_png($self, $rect={}, $target={} ) {
 
 
 sub content_as_png($self, $rect={}, $target={}) {
-    my $img = $self->_content_as_png( $rect, $target )->get;
-    return $self->_as_raw_png( $img );
+    return $self->content_as_png_future( $rect, $target )->get;
 };
+
+sub content_as_png_future($self, $rect={}, $target={}) {
+    $self->_content_as_png( $rect, $target )->then(sub($img) {
+        Future->done( $self->_as_raw_png( $img ) );
+    });
+}
 
 sub getResourceTree_future( $self ) {
     $self->target->send_message( 'Page.getResourceTree' )
@@ -6644,25 +6674,31 @@ This method is specific to WWW::Mechanize::Chrome.
 =cut
 
 sub render_content( $self, %options ) {
+    return $self->render_content_future(%options)->get;
+}
+
+sub render_content_future( $self, %options ) {
     $options{ format } ||= 'png';
 
     my $fmt = delete $options{ format };
     my $filename = delete $options{ filename };
 
-    my $payload;
+    my $payload_f;
     if( $fmt eq 'png' ) {
-        $payload = $self->content_as_png( %options )
+        $payload_f = $self->content_as_png_future( %options )
     } elsif( $fmt eq 'pdf' ) {
-        $payload = $self->content_as_pdf( %options );
+        $payload_f = $self->content_as_pdf_future( %options );
     };
 
-    if( defined $filename ) {
-        open my $fh, '>:raw', $filename
-            or croak "Couldn't create '$filename': $!";
-        print {$fh} $payload;
-    };
+    return $payload_f->then(sub($payload) {
+        if( defined $filename ) {
+            open my $fh, '>:raw', $filename
+                or croak "Couldn't create '$filename': $!";
+            print {$fh} $payload;
+        };
 
-    $payload
+        return Future->done($payload);
+    });
 }
 
 =head2 C<< $mech->content_as_pdf(%options) >>
@@ -6699,20 +6735,28 @@ our %PaperFormats = (
 );
 
 sub content_as_pdf($self, %options) {
+    return $self->content_as_pdf_future(%options)->get;
+}
+
+sub content_as_pdf_future($self, %options) {
     if( my $format = delete $options{ format }) {
         my $wh = $PaperFormats{ lc $format }
             or croak "Unknown paper format '$format'";
         @options{'paperWidth','paperHeight'} = @{$wh}{'width','height'};
     };
 
-    my $base64 = $self->target->send_message('Page.printToPDF', %options)->get->{data};
-    my $payload = decode_base64( $base64 );
-    if( my $filename = delete $options{ filename } ) {
-        open my $fh, '>:raw', $filename
-            or croak "Couldn't create '$filename': $!";
-        print {$fh} $payload;
-    };
-    return $payload;
+    my $filename = delete $options{ filename };
+
+    $self->target->send_message('Page.printToPDF', %options)->then(sub($res) {
+        my $base64 = $res->{data};
+        my $payload = decode_base64( $base64 );
+        if( defined $filename ) {
+            open my $fh, '>:raw', $filename
+                or croak "Couldn't create '$filename': $!";
+            print {$fh} $payload;
+        };
+        return Future->done($payload);
+    });
 };
 
 =head1 INTERNAL METHODS
