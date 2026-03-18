@@ -105,8 +105,8 @@ t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
         or diag Dumper \@found_links;
 
     {
-        # https://bugs.chromium.org/p/chromium/issues/detail?id=1080560
-        local $TODO = "Chrome bug 1080560, Chrome DevTools don't implement XML parsing";
+        # https://issues.chromium.org/issues/40130141 (formerly 1080560)
+        local $TODO = "Chromium bug 40130141: DOM.performSearch uses 'tagsoup' HTML parser even for XHTML documents";
         my $file = 't/xhtml.xhtml';
         my $html = do { open my $fh, '<', $file or die "$file: $!"; local $/; <$fh> };
         $mech->update_html($html);
