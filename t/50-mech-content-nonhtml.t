@@ -34,6 +34,7 @@ t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
     isa_ok $mech, 'WWW::Mechanize::Chrome';
 
     $mech->get('https://corion.net/style.css');
+    $mech->sleep(2); # Generous moment for body arrival on Windows
 
     my $body = t::helper::safe_decoded_content($mech);
 
