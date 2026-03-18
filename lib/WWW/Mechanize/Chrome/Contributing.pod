@@ -244,15 +244,24 @@ L<Chromium bug 40130141|https://issues.chromium.org/issues/40130141> (formerly
 1080560) describes a discrepancy between the Blink rendering engine and the
 CDP (Chrome DevTools Protocol) backend.
 
-While the browser correctly renders XHTML using an XML parser, the CDP method
-C<DOM.performSearch> (used by C<xpath()>, C<selector()>, and C<links()>)
-re-parses the document bytes using a "tagsoup" HTML parser. This causes issues
-with CDATA sections and script tags that contain literal C<< </script> >>
-strings, leading to incorrect node identification.
+The primary logic for the C<DOM.performSearch> method resides in
+C<InspectorDOMAgent::performSearch> within the Blink renderer source code at
+L<third_party/blink/renderer/core/inspector/inspector_dom_agent.cc|https://github.com/chromium/chromium/blob/main/third_party/blink/renderer/core/inspector/inspector_dom_agent.cc#L1375>.
+
+While the browser correctly renders XHTML using an XML parser, the CDP search
+backend performs a manual plain-text search across node values that is not
+sufficiently context-aware of the document's MIME type. This causes it to
+identify "phantom" elements (like C<< <a> >>) that are actually just strings
+inside CDATA sections or script tags.
 
 =head3 Proposed Resolution
 
-To resolve this within this module, we should implement a JavaScript-based
+A permanent fix in Chromium would likely involve modifying the manual search
+loop in C<InspectorDOMAgent::performSearch> to respect XML semantics when the
+document is XHTML, or ensuring that structural searches (like XPath) are
+privileged over the plain-text scanner for XML-based content.
+
+To resolve this within this module, we have implemented a JavaScript-based
 extraction fallback for documents with an XHTML content type:
 
 =over 4
