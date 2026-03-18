@@ -48,7 +48,7 @@ t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
 
     my $link = "https://google.com/maps/search/Furniture+at+Praha/@50.1064625,14.3744223,14z/";
 
-    $mech->get($link);
+    t::helper::safe_get($mech, $link, timeout => 10);
     # The error with HTTP::Message must be occurred on the next step
 
 # It seems we have some delayed loading that messes up the DOM here :-(

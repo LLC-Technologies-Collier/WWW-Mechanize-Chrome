@@ -49,19 +49,36 @@ sub load_file_ok {
 
 t::helper::run_across_instances(\@instances, \&new_mech, 4, sub {
     my ($browser_instance, $mech) = @_;
+
+    t::helper::set_watchdog(30);
+
     isa_ok $mech, 'WWW::Mechanize::Chrome';
 
     my @alerts;
+    my $alert_f = Future->new;
 
     $mech->on_dialog( sub {
         my ( $mech, $dialog ) = @_;
         push @alerts, $dialog;
         $mech->handle_dialog(1); # I always click "OK", why?
+        if (@alerts == 2) {
+            $alert_f->done if !$alert_f->is_ready;
+        }
+        # Give Windows a moment to breath before the next alert
+        Time::HiRes::sleep(0.1) if $^O =~ /mswin/i;
     });
 
     load_file_ok($mech, '58-alert.html', javascript => 1);
 
-    is 0+@alerts, 2, "got two alerts";
+    # Wait up to 10s for both alerts to arrive
+    my $wait_start = time;
+    eval { $alert_f->within(10)->get };
+    if ($@) {
+        note "Timed out waiting for alerts after " . (time - $wait_start) . "s";
+    }
+
+    is 0+@alerts, 2, "got two alerts"
+        or diag explain \@alerts;
 
     undef $mech;
 });
