@@ -151,7 +151,8 @@ t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
     };
     is $ok, 1, "We survived setting the second date field"
         or diag $@;
-    @result = $mech->value('date',2);
+    $mech->sleep(1) if $^O =~ /mswin/i;
+    @result = t::helper::safe_value($mech, 'date', 2, { timeout => 15 });
     is_deeply \@result, ['2020-04-04'], "We set the second date field";
 
     note "End of test sub for $browser_instance";

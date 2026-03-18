@@ -5435,22 +5435,28 @@ method for that.
 =cut
 
 sub value {
-    if (@_ == 3) {
-        my ($self,$name,$index) = @_;
+    my $self = shift;
+    $self->value_future(@_)->get;
+}
+
+sub value_future {
+    my $self = shift;
+    if (@_ == 2) {
+        my ($name,$index) = @_;
 
         if( defined $index and $index !~ /^\d+$/ ) {
             $self->signal_condition("Non-numeric index passed to ->value(). Did you mean to call ->field('$name' => '$index') ?");
         };
 
-        return $self->get_set_value(
+        return $self->get_set_value_future(
             node => $self->current_form,
             index => $index,
             name => $name,
         );
 
     } else {
-        my ($self,$name,%options) = @_;
-        return $self->get_set_value(
+        my ($name,%options) = @_;
+        return $self->get_set_value_future(
             node => $self->current_form,
             %options,
             name => $name,
