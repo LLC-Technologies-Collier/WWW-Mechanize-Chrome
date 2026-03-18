@@ -105,23 +105,18 @@ t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
         or diag Dumper \@found_links;
 
     {
-        # https://issues.chromium.org/issues/40130141 (formerly 1080560)
-        local $TODO = "Chromium bug 40130141: DOM.performSearch uses 'tagsoup' HTML parser even for XHTML documents";
+        # Chromium bug 40130141: DOM.performSearch uses 'tagsoup' HTML parser even for XHTML documents
+        # Resolved in WMC via JS fallback search and XHTML-aware update_html
         my $file = 't/xhtml.xhtml';
         my $html = do { open my $fh, '<', $file or die "$file: $!"; local $/; <$fh> };
         $mech->update_html($html);
         #$mech->get_local('xhtml.xhtml'); # this still fails
         @found_links = map {[$_->url,$_->text]}
                    grep { $_->url } $mech->links;
-        if(! is_deeply \@found_links, [
+        is_deeply \@found_links, [
             ['http://www.example.com/1', 'One'],
             ['http://www.example.com/5', 'Five'],
             ['http://www.example.com/7', 'Seven'],
-        ], "We parse nasty XHTML") {
-            diag Dumper \@found_links;
-            diag $mech->uri;
-            diag $mech->ct;
-            #diag $mech->content;
-        };
+        ], "We parse nasty XHTML";
     };
 });

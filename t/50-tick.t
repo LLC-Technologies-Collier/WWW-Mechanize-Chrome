@@ -97,7 +97,8 @@ note "End of test sub for $browser_instance";
 });
 
 if( $^O =~ /mswin/i ) {
-    alarm(0);
+alarm(0);
 } else {
-    ualarm(0);
+alarm(0);
 }
+
