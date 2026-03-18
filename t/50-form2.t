@@ -154,9 +154,11 @@ t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
     @result = $mech->value('date',2);
     is_deeply \@result, ['2020-04-04'], "We set the second date field";
 
-    if( $^O =~ /mswin/i ) {
-        alarm(0);
-    } else {
-        ualarm(0);
-    }
+    note "End of test sub for $browser_instance";
 });
+
+if( $^O =~ /mswin/i ) {
+    alarm(0);
+} else {
+    ualarm(0);
+}
