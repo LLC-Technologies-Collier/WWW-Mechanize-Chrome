@@ -3830,14 +3830,19 @@ This method is implemented via L<WWW::Mechanize::Plugin::Selector>.
 
 sub selector {
     my ($self,$query,%options) = @_;
+    return $self->selector_future($query, %options)->get;
+};
+
+sub selector_future {
+    my ($self,$query,%options) = @_;
     $options{ user_info } ||= "CSS selector '$query'";
     if ('ARRAY' ne (ref $query || '')) {
         $query = [$query];
     };
     my $root = $options{ node } ? './' : '';
     my @q = map { selector_to_xpath($_, root => $root) } @$query;
-    $self->xpath(\@q, %options);
-};
+    return $self->xpath_future(\@q, %options);
+}
 
 =head2 C<< $mech->find_link_dom( %options ) >>
 
@@ -4662,6 +4667,11 @@ CSS selectors.
 
 sub by_id {
     my ($self,$query,%options) = @_;
+    return $self->by_id_future($query, %options)->get;
+};
+
+sub by_id_future {
+    my ($self,$query,%options) = @_;
     if ('ARRAY' ne (ref $query||'')) {
         $query = [$query];
     };
@@ -4669,7 +4679,7 @@ sub by_id {
                             . join(" or ", map {qq{'$_'}} @$query)
                             . " found";
     $query = [map { qq{.//*[\@id="$_"]} } @$query];
-    $self->xpath($query, %options)
+    return $self->xpath_future($query, %options);
 }
 
 =head2 C<< $mech->click( $name [,$x ,$y] ) >>
@@ -4987,13 +4997,20 @@ are identical to those accepted by the L<< /$mech->xpath >> method.
 
 sub form_name {
     my ($self,$name,%options) = @_;
+    $self->form_name_future($name, %options)->get;
+};
+
+sub form_name_future {
+    my ($self,$name,%options) = @_;
     $name = quote_xpath( $name );
     _default_limiter( single => \%options );
-    $self->{current_form} = $self->selector("form[name='$name']",
+    return $self->selector_future("form[name='$name']",
         user_info => "form name '$name'",
         %options
-    );
-};
+    )->on_done(sub($res) {
+        $self->{current_form} = $res;
+    });
+}
 
 =head2 C<< $mech->form_id( $id [, %options] ) >>
 
@@ -5011,13 +5028,19 @@ This is equivalent to calling
 
 sub form_id {
     my ($self,$name,%options) = @_;
+    $self->form_id_future($name, %options)->get;
+};
 
+sub form_id_future {
+    my ($self,$name,%options) = @_;
     _default_limiter( single => \%options );
-    $self->{current_form} = $self->by_id($name,
+    return $self->by_id_future($name,
         user_info => "form with id '$name'",
         %options
-    );
-};
+    )->on_done(sub($res) {
+        $self->{current_form} = $res;
+    });
+}
 
 =head2 C<< $mech->form_number( $number [, %options] ) >>
 
@@ -5031,13 +5054,18 @@ are identical to those accepted by the L<< /$mech->xpath >> method.
 
 sub form_number {
     my ($self,$number,%options) = @_;
+    $self->form_number_future($number, %options)->get;
+};
 
+sub form_number_future {
+    my ($self,$number,%options) = @_;
     _default_limiter( single => \%options );
-    $self->{current_form} = $self->xpath("(//form)[$number]",
+    return $self->xpath_future("(//form)[$number]",
         user_info => "form number $number",
         %options
-    );
-    $self->{current_form};
+    )->on_done(sub($res) {
+        $self->{current_form} = $res;
+    });
 };
 
 =head2 C<< $mech->form_with_fields( [$options], @fields ) >>
@@ -5057,6 +5085,11 @@ See also L<< /$mech->submit_form >>.
 
 sub form_with_fields {
     my ($self,@fields) = @_;
+    $self->form_with_fields_future(@fields)->get;
+};
+
+sub form_with_fields_future {
+    my ($self,@fields) = @_;
     my $options = {};
     if (ref $fields[0] eq 'HASH') {
         $options = shift @fields;
@@ -5066,12 +5099,12 @@ sub form_with_fields {
     my $q = "//form[" . join( " and ", @clauses)."]";
     #warn $q;
     _default_limiter( single => $options );
-    $self->{current_form} = $self->xpath($q,
+    return $self->xpath_future($q,
         user_info => "form with fields [@fields]",
         %$options
-    );
-    #warn $form;
-    $self->{current_form};
+    )->on_done(sub($res) {
+        $self->{current_form} = $res;
+    });
 };
 
 =head2 C<< $mech->forms( %options ) >>
