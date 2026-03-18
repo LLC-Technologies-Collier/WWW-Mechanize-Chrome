@@ -1,5 +1,41 @@
 package # hide from CPAN indexer
     t::helper;
+
+=head1 NAME
+
+t::helper - Internal test helper for WWW::Mechanize::Chrome
+
+=head1 SYNOPSIS
+
+    use t::helper;
+
+    # Set a 30-second watchdog
+    t::helper::set_watchdog(30);
+
+    # Get available Chrome instances
+    my @instances = t::helper::browser_instances();
+
+    # Run tests across all instances
+    t::helper::run_across_instances(\@instances, \&new_mech, $test_count, sub {
+        my ($instance, $mech) = @_;
+
+        # Use safe wrappers with integrated timeouts
+        t::helper::safe_get($mech, 'http://localhost/test');
+        my $content = t::helper::safe_content($mech);
+    });
+
+=head1 DESCRIPTION
+
+This module provides common utility functions for the WWW::Mechanize::Chrome
+test suite. It is designed to handle platform-specific quirks (especially on
+Windows Server), manage process cleanup, and provide "safe" wrappers around
+core library methods to prevent tests from hanging indefinitely.
+
+The module also monkey-patches C<WWW::Mechanize::Chrome> during testing to
+improve PID tracking and ensure more aggressive process termination via SIGKILL.
+
+=cut
+
 use strict;
 use Test::More;
 use File::Glob qw(bsd_glob);
@@ -455,5 +491,71 @@ sub set_watchdog {
         Time::HiRes::ualarm($timeout_s * 1_000_000);
     }
 }
+
+=head1 FUNCTIONS
+
+=head2 C<set_watchdog( $timeout_seconds )>
+
+Sets a process-level watchdog timer. If the test process exceeds this timeout, it
+will be terminated. On Windows Server (C<AD2>), it spawns a background process
+that uses C<taskkill> via SSH to ensure the entire Chrome process tree is cleaned up.
+
+=head2 C<browser_instances( $filter_regex )>
+
+Returns a list of Chrome executable paths to test against. It respects the
+C<CHROME_BIN> and C<TEST_WWW_MECHANIZE_CHROME_VERSIONS> environment variables.
+
+=head2 C<safe_server( %options )>
+
+A robust wrapper around C<Test::HTTP::LocalServer-E<gt>spawn>. It retries
+spawning the server up to 3 times on failure, which is useful on Windows.
+
+=head2 C<safe_get( $mech, $url, %options )>
+
+A non-blocking wrapper around C<get_future> that includes a default 10-second
+timeout and timing diagnostics.
+
+=head2 C<safe_xpath( $mech, $query, %options )>
+
+A non-blocking wrapper around C<xpath_future> that includes a default 5-second
+timeout.
+
+=head2 C<safe_field( $mech, $name, $value, @args )>
+
+A non-blocking wrapper around C<field_future> that includes a 5-second timeout.
+
+=head2 C<safe_value( $mech, @args )>
+
+A non-blocking wrapper around C<get_set_value_future> with a 5-second timeout.
+
+=head2 C<safe_set_fields( $mech, %fields )>
+
+A non-blocking wrapper around C<set_fields_future> with a 15-second timeout.
+
+=head2 C<safe_content( $mech, %options )>
+
+A non-blocking wrapper around C<content_future> with a 10-second timeout.
+
+=head2 C<safe_decoded_content( $mech, %options )>
+
+A non-blocking wrapper around C<decoded_content_future> with a 10-second timeout.
+
+=head2 C<safe_render_content( $mech, %options )>
+
+A non-blocking wrapper around C<render_content_future> with a 30-second timeout.
+
+=head2 C<safe_content_as_png( $mech, %options )>
+
+A non-blocking wrapper around C<content_as_png_future> with a 30-second timeout.
+
+=head2 C<safe_content_as_pdf( $mech, %options )>
+
+A non-blocking wrapper around C<content_as_pdf_future> with a 30-second timeout.
+
+=head2 C<safe_update_html( $mech, $html, %options )>
+
+A non-blocking wrapper around C<update_html_future> with a 10-second timeout.
+
+=cut
 
 1;
