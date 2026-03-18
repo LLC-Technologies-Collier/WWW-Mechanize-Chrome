@@ -2092,9 +2092,12 @@ sub close {
             $c->retain();
         } else {
             # Use a non-blocking wait loop to avoid overriding alarm()
-            my $timeout_f = $_[0]->target->sleep(5);
-            my $wait_f = Future->wait_any($c, $timeout_f);
-            $wait_f->get;
+            # On Windows, be more patient but don't hang forever
+            my $timeout = 5;
+            my $start = time;
+            while( ! $c->is_ready and time - $start < $timeout ) {
+                $_[0]->target->sleep(0.1)->get;
+            }
             if( ! $c->is_ready ) {
                 $_[0]->log('debug', "Tab closure timed out");
             }

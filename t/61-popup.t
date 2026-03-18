@@ -173,13 +173,14 @@ HTML
 
     is 0+@opened, 0, "We can disable our on_popup callback";
 
-    note "Cleaning up";
-    if( $^O =~ /mswin/i ) {
-        alarm(0);
-    } else {
-        ualarm(0); # disable watchdog
-    }
+    note "Cleaning up instance $browser_instance";
 });
+
+if( $^O =~ /mswin/i ) {
+    alarm(0);
+} else {
+    ualarm(0); # disable watchdog
+}
 
 #if( ! $target_tab->{targetId}) {
 #    die "This Chrome doesn't want more than one debugger connection";
