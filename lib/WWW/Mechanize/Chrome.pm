@@ -3810,7 +3810,7 @@ sub make_link {
 
 sub links {
     my ($self) = @_;
-    my @links = $self->selector( join ",", sort keys %link_spec);
+    my @links = $self->selector( (join ",", sort keys %link_spec), wantarray => 1);
     my $base = $self->base;
     return map {
         $self->make_link($_,$base)
@@ -3833,17 +3833,20 @@ This method is implemented via L<WWW::Mechanize::Plugin::Selector>.
 
 sub selector {
     my ($self,$query,%options) = @_;
+    $options{ wantarray } = wantarray if ! exists $options{ all } and ! exists $options{ wantarray };
     return $self->selector_future($query, %options)->get;
 };
 
 sub selector_future {
     my ($self,$query,%options) = @_;
+    my $wantarray = exists $options{ wantarray } ? delete $options{ wantarray } : wantarray;
     $options{ user_info } ||= "CSS selector '$query'";
     if ('ARRAY' ne (ref $query || '')) {
         $query = [$query];
     };
     my $root = $options{ node } ? './' : '';
     my @q = map { selector_to_xpath($_, root => $root) } @$query;
+    $options{ wantarray } = $wantarray;
     return $self->xpath_future(\@q, %options);
 }
 
@@ -3963,6 +3966,7 @@ sub _match_any_link_params( $self, $link, $p ) {
 
 sub find_link_dom {
     my ($self,%opts) = @_;
+    $opts{ wantarray } = wantarray if ! exists $opts{ all } and ! exists $opts{ wantarray };
     my %xpath_options;
 
     # Clean up some legacy stuff
@@ -4032,7 +4036,7 @@ sub find_link_dom {
             }  (@tags);
     #warn $q;
 
-    my @res = $self->xpath($q, %xpath_options );
+    my @res = $self->xpath($q, %opts, all => 1, wantarray => 1 );
 
     if (keys %opts) {
         # post-filter the remaining links
@@ -4132,7 +4136,7 @@ This defaults to not look through child frames.
 sub find_all_links_dom {
     my ($self,%opts) = @_;
     $opts{ n } = 'all';
-    my @matches = $self->find_link_dom( frames => 0, %opts );
+    my @matches = $self->find_link_dom( frames => 0, %opts, wantarray => 1 );
     return @matches if wantarray;
     return \@matches;
 };
@@ -4561,12 +4565,8 @@ sub _performSearch( $self, %args ) {
 
 sub xpath( $self, $query, %options) {
     # Ensure xpath_future knows the context
-    $options{ wantarray } = wantarray;
-    if( wantarray ) {
-        return $self->xpath_future($query, %options)->get;
-    } else {
-        return scalar $self->xpath_future($query, %options)->get;
-    }
+    $options{ wantarray } = wantarray if ! exists $options{ all };
+    return $self->xpath_future($query, %options)->get;
 }
 
 sub xpath_future( $self, $query, %options) {
@@ -4595,7 +4595,7 @@ sub xpath_future( $self, $query, %options) {
 
     # Sanity check for the common error of
     # my $item = $mech->xpath("//foo");
-    if (! exists $options{ all } and not ($return_first_element)) {
+    if (! $options{ all } and not ($return_first_element)) {
         $self->signal_condition(join "\n",
             "You asked for many elements but seem to only want a single item.",
             "Did you forget to pass the 'single' option with a true value?",
@@ -5000,13 +5000,16 @@ are identical to those accepted by the L<< /$mech->xpath >> method.
 
 sub form_name {
     my ($self,$name,%options) = @_;
+    $options{ wantarray } = wantarray;
     $self->form_name_future($name, %options)->get;
 };
 
 sub form_name_future {
     my ($self,$name,%options) = @_;
+    my $wantarray = exists $options{ wantarray } ? delete $options{ wantarray } : wantarray;
     $name = quote_xpath( $name );
     _default_limiter( single => \%options );
+    $options{ wantarray } = $wantarray;
     return $self->selector_future("form[name='$name']",
         user_info => "form name '$name'",
         %options
@@ -5031,12 +5034,15 @@ This is equivalent to calling
 
 sub form_id {
     my ($self,$name,%options) = @_;
+    $options{ wantarray } = wantarray;
     $self->form_id_future($name, %options)->get;
 };
 
 sub form_id_future {
     my ($self,$name,%options) = @_;
+    my $wantarray = exists $options{ wantarray } ? delete $options{ wantarray } : wantarray;
     _default_limiter( single => \%options );
+    $options{ wantarray } = $wantarray;
     return $self->by_id_future($name,
         user_info => "form with id '$name'",
         %options
@@ -5057,12 +5063,15 @@ are identical to those accepted by the L<< /$mech->xpath >> method.
 
 sub form_number {
     my ($self,$number,%options) = @_;
+    $options{ wantarray } = wantarray;
     $self->form_number_future($number, %options)->get;
 };
 
 sub form_number_future {
     my ($self,$number,%options) = @_;
+    my $wantarray = exists $options{ wantarray } ? delete $options{ wantarray } : wantarray;
     _default_limiter( single => \%options );
+    $options{ wantarray } = $wantarray;
     return $self->xpath_future("(//form)[$number]",
         user_info => "form number $number",
         %options
@@ -5088,6 +5097,11 @@ See also L<< /$mech->submit_form >>.
 
 sub form_with_fields {
     my ($self,@fields) = @_;
+    my $options = {};
+    if (ref $fields[0] eq 'HASH') {
+        $options = $fields[0];
+    }
+    $options->{ wantarray } = wantarray;
     $self->form_with_fields_future(@fields)->get;
 };
 
@@ -5097,11 +5111,13 @@ sub form_with_fields_future {
     if (ref $fields[0] eq 'HASH') {
         $options = shift @fields;
     };
+    my $wantarray = exists $options->{ wantarray } ? delete $options->{ wantarray } : wantarray;
     my @clauses  = map { $self->element_query([qw[input select textarea]], { 'name' => $_ })} @fields;
 
     my $q = "//form[" . join( " and ", @clauses)."]";
     #warn $q;
     _default_limiter( single => $options );
+    $options->{ wantarray } = $wantarray;
     return $self->xpath_future($q,
         user_info => "form with fields [@fields]",
         %$options
@@ -5128,7 +5144,7 @@ The returned elements are the DOM C<< <form> >> elements.
 
 sub forms {
     my ($self, %options) = @_;
-    my @res = $self->selector('form', %options);
+    my @res = $self->selector('form', %options, wantarray => 1);
     return wantarray ? @res
                      : \@res
 };

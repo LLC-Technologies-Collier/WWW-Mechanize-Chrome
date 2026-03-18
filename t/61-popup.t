@@ -173,7 +173,7 @@ HTML
 
     is 0+@opened, 0, "We can disable our on_popup callback";
 
-    note "Cleaning up instance $browser_instance";
+    note "Cleaning up instance $file";
 });
 
 if( $^O =~ /mswin/i ) {
