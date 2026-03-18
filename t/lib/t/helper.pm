@@ -8,6 +8,7 @@ use File::Spec;
 use Carp qw(croak);
 use File::Temp 'tempdir';
 use WWW::Mechanize::Chrome;
+use Test::HTTP::LocalServer;
 use Config;
 use Time::HiRes qw(sleep time);
 use POSIX qw(:sys_wait_h);
@@ -410,6 +411,23 @@ sub safe_update_html {
         Test::More::note(sprintf('update_html() took %.3fs', $elapsed));
     }
     return $res;
+}
+
+sub safe_server {
+    my ($self, %options) = @_;
+    my $retries = 3;
+    my $server;
+    my $err;
+    while ($retries--) {
+        $server = eval { Test::HTTP::LocalServer->spawn(%options) };
+        if ($server && eval { $server->url }) {
+            return $server;
+        }
+        $err = $@ || "Unknown error";
+        Test::More::diag("Test::HTTP::LocalServer spawn failed ($err), retrying ($retries left)...") if $retries > 0;
+        sleep 1;
+    }
+    die "Failed to spawn Test::HTTP::LocalServer after 3 retries: $err";
 }
 
 sub set_watchdog {
