@@ -84,6 +84,8 @@ my $server = Test::HTTP::LocalServer->spawn(
 t::helper::run_across_instances(\@instances, \&new_mech, $test_count, sub {
     my ($browser_instance, $mech) = splice @_;
 
+    t::helper::set_watchdog(60);
+
     pass "We can connect to port $instance_port";
     is $browser_launched, 1, q{We didn't spawn a second process};
     is $mech->{pid}, undef, 'We have no process to kill';
@@ -118,7 +120,14 @@ t::helper::run_across_instances(\@instances, \&new_mech, $test_count, sub {
     }
 
     $browser_launched = 0;
+    note "End of test sub for $browser_instance";
 });
+
+if( $^O =~ /mswin/i ) {
+    alarm(0);
+} else {
+    alarm(0);
+}
 
 undef $existing_mech;
 

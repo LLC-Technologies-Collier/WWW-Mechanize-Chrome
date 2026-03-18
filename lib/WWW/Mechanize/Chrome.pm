@@ -2092,12 +2092,9 @@ sub close {
             $c->retain();
         } else {
             # Use a non-blocking wait loop to avoid overriding alarm()
-            # On Windows, be more patient but don't hang forever
-            my $timeout = 5;
-            my $start = time;
-            while( ! $c->is_ready and time - $start < $timeout ) {
-                $_[0]->target->sleep(0.1)->get;
-            }
+            my $timeout_f = $_[0]->target->sleep(5);
+            my $wait_f = Future->wait_any($c, $timeout_f);
+            $wait_f->get; # This will resolve when either tab closes OR 5s pass
             if( ! $c->is_ready ) {
                 $_[0]->log('debug', "Tab closure timed out");
             }
@@ -3617,7 +3614,24 @@ The value passed in as C<$html> will be stringified.
 sub update_html_future( $self, $content ) {
     my $s = $self;
     weaken $s;
-    my $js = "document.open(); document.write(" . JSON::to_json("$content") . "); document.close();";
+    my $js;
+    if ($content =~ /^\s*<\?xml/i) {
+        # Robust XHTML injection using DOMParser
+        $js = sprintf(q{
+            (function() {
+                var parser = new DOMParser();
+                var doc = parser.parseFromString(%s, "application/xhtml+xml");
+                if (doc.getElementsByTagName("parsererror").length > 0) {
+                    // Fallback to document.write if XML parsing fails
+                    document.open(); document.write(%s); document.close();
+                } else {
+                    document.replaceChild(document.importNode(doc.documentElement, true), document.documentElement);
+                }
+            })()
+        }, JSON::to_json("$content"), JSON::to_json("$content"));
+    } else {
+        $js = "document.open(); document.write(" . JSON::to_json("$content") . "); document.close();";
+    }
     return $self->target->send_message('Runtime.evaluate', expression => $js )
     ->then(sub {
         $s->invalidate_cached_values;
@@ -4318,6 +4332,79 @@ sub _unwrapChildNodeTree( $self, $nodes, $tree={} ) {
     return $tree
 }
 
+sub _performSearchJS( $self, %args ) {
+    my $query = $args{ query };
+    weaken( my $s = $self );
+
+    # Execute XPath in JS to leverage the browser's native XML parser
+    my $js = sprintf(q{
+        (function() {
+            var results = [];
+            var query = %s;
+            var xpathResult = document.evaluate(query, document, null, XPathResult.ORDERED_NODE_SNAPSHOT_TYPE, null);
+            for (var i = 0; i < xpathResult.snapshotLength; i++) {
+                results.push(xpathResult.snapshotItem(i));
+            }
+            return results;
+        })()
+    }, JSON::to_json($query));
+
+    my $nodeGeneration = $s->{_currentNodeGeneration} // 0;
+
+    return $self->_cached_document->then(sub {
+        return $self->target->send_message('Runtime.evaluate', 
+            expression => $js,
+            returnByValue => JSON::false # We want handles to resolve them to nodeId
+        )
+    })->then(sub($res) {
+        my $handle = $res->{result}->{objectId};
+        if (!$handle || $res->{result}->{subtype} eq 'null') {
+            return Future->done();
+        }
+
+        # Resolve the array of elements to individual nodeId entries
+        return $s->target->send_message('Runtime.getProperties', objectId => $handle, ownProperties => JSON::true)
+        ->then(sub($props) {
+            my @reqs = map { 
+                my $objId = $_->{value}->{objectId};
+                $objId ? $s->target->send_message('DOM.requestNode', objectId => $objId) : ()
+            } grep { $_->{name} =~ /^\d+$/ } @{$props->{result}};
+
+            if (!@reqs) {
+                return Future->done();
+            }
+
+            return Future->wait_all(@reqs)->then(sub(@node_ids) {
+                my @describe_reqs = map {
+                    my $nid = $_->get->{nodeId};
+                    $s->target->send_message('DOM.describeNode', nodeId => $nid)
+                    ->then(sub($node_info) {
+                        my $node_data = $node_info->{node};
+                        if( ref $node_data->{attributes} eq 'ARRAY') {
+                            $node_data->{attributes} = +{
+                                @{ $node_data->{attributes} }
+                            };
+                        };
+                        return Future->done(
+                            WWW::Mechanize::Chrome::Node->new(
+                                +{ %$node_data,
+                                driver       => $s->target,
+                                mech         => $s,
+                                _generation  => $nodeGeneration,
+                                cachedNodeId => $nid,
+                                }
+                            )
+                        );
+                    })
+                } @node_ids;
+                
+                # Return list of futures to match _performSearch expectation
+                return Future->done( @describe_reqs );
+            });
+        });
+    });
+}
+
 sub _performSearch( $self, %args ) {
     my $subTreeId = $args{ subTreeId };
     my $query = $args{ query };
@@ -4614,22 +4701,54 @@ sub xpath_future( $self, $query, %options) {
 
     weaken(my $s = $self);
 
-    return $doc->then( sub {
-        my $q = join "|", @$query;
-
-        my @found;
-        my $id;
-        if ($options{ node }) {
-            $id = $options{ node }->backendNodeId;
-            #warn "Performing search (below '$id')";
+    # Safe XHTML check: Use response headers if available, otherwise assume HTML.
+    # Avoid calling uri_future or content_type_future here as they can deadlock
+    # during navigation or on empty pages.
+    my $ct_f;
+    if (my $res = $s->response) {
+        my $ct = $res->header('Content-Type') || '';
+        if ($ct =~ m!application/xhtml\+xml!i) {
+            $ct_f = Future->done($ct);
+        } elsif ($ct =~ m!text/html!i || !$ct) {
+            # Meta check via JS is safe if we have a target
+            $ct_f = $s->eval_in_page_future(q{
+                (function() {
+                    var m = document.querySelector('meta[http-equiv="content-type"]');
+                    return m ? m.getAttribute('content') : null;
+                })()
+            })->then(sub($result = undef) {
+                return Future->done($result ? $result->{result}->{value} : '');
+            })->else(sub { Future->done('') });
         } else {
-            #warn "Performing search across complete DOM";
-        };
-        Future->wait_all(
-            map {
-                $s->_performSearch( query => $_, subTreeId => $id )
-            } @$query
-        );
+            $ct_f = Future->done($ct);
+        }
+    } else {
+        $ct_f = Future->done('');
+    }
+
+    return $ct_f->then(sub($ct = undef) {
+        $ct ||= '';
+        my $is_xhtml = ($ct =~ m!application/xhtml\+xml!i);
+
+        return $doc->then( sub {
+            my $q = join "|", @$query;
+
+            my @found;
+            my $id;
+            if ($options{ node }) {
+                $id = $options{ node }->backendNodeId;
+                #warn "Performing search (below '$id')";
+            } else {
+                #warn "Performing search across complete DOM";
+            };
+            Future->wait_all(
+                map {
+                    $is_xhtml 
+                        ? $s->_performSearchJS( query => $_ )
+                        : $s->_performSearch( query => $_, subTreeId => $id )
+                } @$query
+            );
+        });
     })->then( sub {
         my @found = map { my @r = $_->get; @r ? map { $_->get } @r : () } @_;
         push @res, @found;
