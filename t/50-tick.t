@@ -37,6 +37,8 @@ sub new_mech {
 t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
     my ($browser_instance, $mech) = @_;
 
+    t::helper::set_watchdog(60);
+
 $mech->autodie(1);
 
 $mech->get_local('50-tick.html');
@@ -46,11 +48,13 @@ my ($clicked,$type,$ok);
 # Xpath
 $mech->get_local('50-tick.html');
 is $mech->selector('#unchecked_1',single => 1)->get_attribute('checked'), undef, "#unchecked_1 is not checked";
+note "Ticking #unchecked_1";
 $mech->tick('#unchecked_1');
 is $mech->selector('#unchecked_1',single => 1)->get_attribute('checked'),'checked', "#unchecked_1 is now checked";
 
 $mech->get_local('50-tick.html');
 is $mech->selector('#unchecked_1',single => 1)->get_attribute('checked'),undef, "#unchecked_1 is not checked";
+note "Ticking unchecked index 3";
 $mech->tick('unchecked',3);
 is $mech->selector('#unchecked_1',single => 1)->get_attribute('checked'),undef, "#unchecked_1 is not checked"
     or diag $mech->selector('#unchecked_1',single => 1)->get_attribute('checked');
@@ -59,6 +63,7 @@ is $mech->selector('#unchecked_3',single => 1)->get_attribute('checked'),'checke
 
 $mech->get_local('50-tick.html');
 is $mech->selector('#unchecked_1',single => 1)->get_attribute('checked'),undef, "#unchecked_1 is not checked";
+note "Ticking unchecked index 1";
 $mech->tick('unchecked',1);
 is $mech->selector('#unchecked_1',single => 1)->get_attribute('checked'),'checked',  "#unchecked_1 is now checked";
 is $mech->selector('#unchecked_3',single => 1)->get_attribute('checked'),undef, "#unchecked_3 is not checked";
@@ -66,6 +71,7 @@ is $mech->selector('#unchecked_3',single => 1)->get_attribute('checked'),undef, 
 # Now check not setting things
 $mech->get_local('50-tick.html');
 is $mech->selector('#unchecked_1',single => 1)->get_attribute('checked'),undef, "#unchecked_1 is not checked";
+note "Ticking unchecked index 1 to 0";
 $mech->tick('unchecked',1,0);
 is $mech->selector('#unchecked_1',single => 1)->get_attribute('checked'),undef, "#unchecked_1 is not checked";
 is $mech->selector('#unchecked_3',single => 1)->get_attribute('checked'),undef, "#unchecked_3 is not checked";
@@ -73,6 +79,7 @@ is $mech->selector('#unchecked_3',single => 1)->get_attribute('checked'),undef, 
 # Now check removing checkmarks
 $mech->get_local('50-tick.html');
 is $mech->selector('#prechecked_1',single => 1)->get_attribute('checked'),'checked', "#prechecked_1 is checked";
+note "Ticking prechecked index 1 to 0";
 $mech->tick('prechecked',1,0);
 is $mech->selector('#prechecked_1',single => 1)->get_attribute('checked'),undef, "#prechecked_1 is not checked";
 is $mech->selector('#prechecked_3',single => 1)->get_attribute('checked'),'checked', "#prechecked_3 is still checked";
@@ -81,8 +88,16 @@ is $mech->selector('#prechecked_3',single => 1)->get_attribute('checked'),'check
 $mech->get_local('50-tick.html');
 is $mech->selector('#prechecked_1',single => 1)->get_attribute('checked'),'checked', "#prechecked_1 is checked";
 is $mech->selector('#prechecked_3',single => 1)->get_attribute('checked'),'checked', "#prechecked_3 is checked";
+note "Unticking prechecked index 3";
 $mech->untick('prechecked',3);
 is $mech->selector('#prechecked_1',single => 1)->get_attribute('checked'),'checked', "#prechecked_1 is still checked";
 is $mech->selector('#prechecked_3',single => 1)->get_attribute('checked'),undef, "#prechecked_3 is not checked";
 
+note "End of test sub for $browser_instance";
 });
+
+if( $^O =~ /mswin/i ) {
+    alarm(0);
+} else {
+    ualarm(0);
+}

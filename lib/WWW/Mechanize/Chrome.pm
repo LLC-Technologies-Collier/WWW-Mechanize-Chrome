@@ -4811,6 +4811,11 @@ my %rename = (
 
 sub _option_query {
     my ($self,%options) = @_;
+    return $self->_option_query_future(%options)->get;
+};
+
+sub _option_query_future {
+    my ($self,%options) = @_;
     my ($method,$q);
     for my $meth (keys %rename) {
         if (exists $options{ $meth }) {
@@ -4821,7 +4826,8 @@ sub _option_query {
     _default_limiter( 'one' => \%options );
     croak "Need either a name, a selector or an xpath key!"
         if not $method;
-    return $self->$method( $q, %options );
+    my $f_method = "${method}_future";
+    return $self->$f_method( $q, %options );
 };
 
 # Return the default limiter if no other limiting option is set:
@@ -5713,6 +5719,10 @@ as the options to C<< ->find_link_dom >> to find the element.
 =cut
 
 sub tick($self, $name, $value=undef, $set=1) {
+    $self->tick_future($name, $value, $set)->get;
+}
+
+sub tick_future($self, $name, $value=undef, $set=1) {
     my %options;
     my @boxes;
 
@@ -5758,21 +5768,27 @@ sub tick($self, $name, $value=undef, $set=1) {
                               : "Checkbox with name '$name'";
     };
 
+    my $box_f;
     if ($options{ dom }) {
-        @boxes = $options{ dom };
+        $box_f = Future->done($options{ dom });
     } else {
-        @boxes = $self->_option_query(%options);
+        $box_f = $self->_option_query_future(%options);
     };
 
-    my $target = $boxes[0];
-    my $is_set = ($target->get_attribute( 'checked', live => 1 ) || '') eq 'checked';
-    if ($set xor $is_set) {
-        if ($set) {
-            $target->set_attribute('checked', 'checked');
-        } else {
-            $target->set_attribute('checked', undef);
-        };
-    };
+    return $box_f->then(sub($box) {
+        my $target = ref $box eq 'ARRAY' ? $box->[0] : $box;
+        return $target->get_attribute_future( 'checked', live => 1 )->then(sub($attr_val) {
+            my $is_set = ($attr_val || '') eq 'checked';
+            if ($set xor $is_set) {
+                if ($set) {
+                    return $target->set_attribute_future('checked', 'checked');
+                } else {
+                    return $target->set_attribute_future('checked', undef);
+                };
+            };
+            return Future->done($target);
+        });
+    });
 };
 
 =head2 C<< $mech->untick( $name, $value ) >>
@@ -5787,7 +5803,12 @@ Causes the checkbox to be unticked. Shorthand for
 
 sub untick {
     my ($self, $name, $value) = @_;
-    $self->tick( $name, $value, undef );
+    $self->untick_future($name, $value)->get;
+};
+
+sub untick_future {
+    my ($self, $name, $value) = @_;
+    $self->tick_future( $name, $value, undef );
 };
 
 =head2 C<< $mech->submit( $form ) >>
