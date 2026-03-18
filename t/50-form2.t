@@ -8,6 +8,11 @@ use WWW::Mechanize::Chrome;
 use lib '.';
 
 use t::helper;
+use Time::HiRes qw(sleep time);
+if( $^O !~ /mswin/i ) {
+    require Time::HiRes;
+    Time::HiRes->import('ualarm');
+}
 
 Log::Log4perl->easy_init($ERROR);
 
@@ -33,6 +38,8 @@ sub new_mech {
 t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
     my ($browser_instance, $mech) = @_;
 
+    t::helper::set_watchdog(30);
+
     $mech->get_local('50-form2.html');
     ok $mech->current_form, "At start, we have a current form";
     $mech->form_number(2);
@@ -50,7 +57,7 @@ t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
     ok !!$content, "We got content from asking the current form with get_attribute";
     my $backendNodeId = $mech->current_form->backendNodeId;
     ok !!$backendNodeId, "The form has a backendNodeId '$backendNodeId'";
-    $mech->field('id', 99);
+    t::helper::safe_field($mech, 'id', 99);
     pass "We survived setting the field 'id' to 99";
     my $current_form = $mech->current_form;
     ok !!$current_form, "We got a current form";
@@ -68,16 +75,18 @@ t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
     is $@, '', "No error when retrieving form HTML";
     ok !!$content2, "We got content from (again) asking the current form with get_attribute";
     isnt $content2, $content, "we managed to change the form by setting the 'id' field";
-    is $mech->xpath('.//*[@name="id"]',
+    is t::helper::safe_xpath($mech, './/*[@name="id"]',
         node => $mech->current_form,
         single => 1)->get_attribute('value', live => 1), 99,
         "We have set field 'id' to '99' in the correct form";
 
     $mech->get_local('50-form2.html');
+    note "Selecting form by fields 'r1','r2'";
     $mech->form_with_fields('r1','r2');
     ok $mech->current_form, "We can find a form by its contained input fields";
 
     $mech->get_local('50-form2.html');
+    note "Selecting form by name 'snd'";
     $mech->form_name('snd');
     ok $mech->current_form, "We can find a form by its name";
     is $mech->current_form->get_attribute('name'), 'snd', "We can find a form by its name";
@@ -86,47 +95,59 @@ t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
     ok $mech->current_form, "On a new ->get, we have a current form";
 
     $mech->get_local('50-form2.html');
+    note "Selecting form by field 'comment'";
     $mech->form_with_fields('comment');
     ok $mech->current_form, "We can find a form by its contained textarea fields";
     $mech->field('comment', "Just another Phrome Hacker,");
     pass "We survived setting the field 'comment' to some JAPH";
-    like $mech->xpath('.//textarea',
+    like t::helper::safe_xpath($mech, './/textarea',
         node   => $mech->current_form,
         single => 1)->get_attribute('value'), qr/Just another/,
         "We set textarea and verified it";
 
     $mech->get_local('50-form2.html');
+    note "Selecting form by field 'quickcomment'";
     $mech->form_with_fields('quickcomment');
     ok $mech->current_form, "We can find a form by its contained select fields";
-    $mech->field('quickcomment', 2);
+    t::helper::safe_field($mech, 'quickcomment', 2);
     pass "We survived setting the field 'quickcomment' to 2";
-    my @result = $mech->value('quickcomment');
+    $mech->sleep(0.1) if $^O =~ /mswin/i;
+    my @result = t::helper::safe_value($mech, 'quickcomment');
     cmp_bag \@result, [2], "->field returned bag 2";
     # diag explain \@result;
 
     $mech->get_local('50-form2.html');
+    note "Selecting form by field 'multic'";
     $mech->form_with_fields('multic');
     ok $mech->current_form, "We can find a form by its contained multi-select fields";
-    @result = $mech->value('multic');
+    $mech->sleep(0.1) if $^O =~ /mswin/i;
+    @result = t::helper::safe_value($mech, 'multic', { all => 1 });
     cmp_bag \@result, [2,2,3], "->field returned bag 2,2,3";
     # diag explain \@result;
 
-    $mech->field('multic', [1,2]);
+    note "Setting multic to 1,2";
+    t::helper::safe_field($mech, 'multic', [1,2]);
     pass "We survived setting the field 'multic' to 1,2";
-    @result = $mech->value('multic');
+    @result = t::helper::safe_value($mech, 'multic', { all => 1 });
     cmp_bag \@result, [1,1,2,2], "->field returned bag 1,1,2,2";
     # diag explain \@result;
 
-    # Check that we can address multiple fields with the same form parameter name
     $mech->get_local('50-form2.html');
+    note "Selecting form by field 'date'";
     $mech->form_with_fields('date');
     @result = ();
     my $ok = eval {
-        $mech->set_fields( date => ['2020-04-04',2] );
+        t::helper::safe_set_fields($mech, date => ['2020-04-04',2] );
         1;
     };
     is $ok, 1, "We survived setting the second date field"
         or diag $@;
     @result = $mech->value('date',2);
     is_deeply \@result, ['2020-04-04'], "We set the second date field";
+
+    if( $^O =~ /mswin/i ) {
+        alarm(0);
+    } else {
+        ualarm(0);
+    }
 });

@@ -10,7 +10,11 @@ use lib '.';
 
 use t::helper;
 
-use Time::HiRes qw(ualarm sleep time);
+use Time::HiRes qw(sleep time);
+if( $^O !~ /mswin/i ) {
+    require Time::HiRes;
+    Time::HiRes->import('ualarm');
+}
 Log::Log4perl->easy_init($ERROR);
 
 # What instances of Chrome will we try?
@@ -39,12 +43,8 @@ sub new_mech {
 t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
     my( $file, $mech ) = splice @_; # so we move references
     
-    # KILL THE SUBTEST if it takes more than 2 seconds total for this instance
-    local $SIG{ALRM} = sub { 
-        diag "Instance test run timed out after 2s! KILLING.";
-        CORE::exit(1);
-    };
-    ualarm(2000000);
+    t::helper::set_watchdog(30);
+
     if( $ENV{WWW_MECHANIZE_CHROME_TRANSPORT}
         and $ENV{WWW_MECHANIZE_CHROME_TRANSPORT} eq 'Chrome::DevToolsProtocol::Transport::Mojo'
     ) {

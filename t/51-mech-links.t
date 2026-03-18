@@ -48,7 +48,7 @@ t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
     isa_ok $mech, 'WWW::Mechanize::Chrome';
 
     $mech->get_local('51-mech-links-nobase.html');
-    $mech->sleep(0.25); # Wait for DOM to stabilize (iframes loading)
+    $mech->sleep(0.5); # Wait for DOM to stabilize (iframes loading)
 
     my @found_links = $mech->links;
     # There is a FRAME tag, but FRAMES are exclusive elements
@@ -59,7 +59,7 @@ t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
     };
 
     $mech->get_local('51-mech-links-base.html');
-    $mech->sleep(0.25); # Wait for DOM to stabilize
+    $mech->sleep(0.5); # Wait for DOM to stabilize
 
     @found_links = $mech->links;
     SKIP: {

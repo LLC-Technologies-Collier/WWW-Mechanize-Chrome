@@ -59,8 +59,11 @@
     * Refine saveResources error handling to be scheme-aware: report
       file:// cache misses as warnings while maintaining strict error
       propagation for HTTP/HTTPS.
-    * Stabilize t/51-mech-links.t by adding a short wait (0.25s) for DOM
-      stabilization after loading pages with iframes.
+    * Harden saveResources to handle nodeId invalidation and absolute
+      path mappings on Windows.
+    * Refine filenameFromUrl to use a safer truncation limit (150 chars)
+      and preserve extensions.
+    * Stabilize t/51-mech-links.t with increased (0.5s) wait for DOM.
 
 0.76 2026-03-13
     * Harden test suite against Chromium process leaks and hangs by

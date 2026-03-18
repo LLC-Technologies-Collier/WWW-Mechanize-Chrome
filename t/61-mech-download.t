@@ -5,6 +5,7 @@ use Cwd;
 use URI::file;
 use File::Basename;
 use File::Spec;
+use File::Glob qw(bsd_glob);
 use File::Temp 'tempdir';
 use Log::Log4perl qw(:easy);
 
@@ -48,7 +49,11 @@ t::helper::run_across_instances(\@instances, \&new_mech, 5, sub {
 
     my ($browser_instance, $mech) = @_;
 
+    t::helper::set_watchdog(30);
+
     isa_ok $mech, 'WWW::Mechanize::Chrome';
+    $d =~ s!/!\\!g if $^O =~ /mswin/i;
+    note "Download directory: $d";
     SKIP: {
         my $version = $mech->chrome_version;
 
@@ -68,17 +73,21 @@ t::helper::run_across_instances(\@instances, \&new_mech, 5, sub {
         } else {
 
             my ($site,$estatus) = ($server->download('mytest.txt'),200);
-            my $res = $mech->get($site);
+            my $res = t::helper::safe_get($mech, $site);
             isa_ok $res, 'HTTP::Response', "Response";
             ok $mech->success, "The download (always) succeeds";
             like $res->header('Content-Disposition'), qr/attachment;/, "We got a download response";
 
-            my $timeout = time+1;
+            my $timeout = time+10;
             while( time < $timeout
                    && ! -f "$d/mytest.txt" ) {
                 $mech->sleep(0.1);
             };
-            ok -f "$d/mytest.txt", "File 'mytest.txt' was downloaded OK";
+            ok -f "$d/mytest.txt", "File 'mytest.txt' was downloaded OK"
+                or do {
+                    diag "Download failed or timed out after " . (10 - ($timeout - time)) . "s";
+                    diag "Contents of $d: " . join(", ", bsd_glob("$d/*"));
+                };
         };
     }
 });

@@ -209,4 +209,162 @@ sub run_across_instances {
     return;
 };
 
+sub safe_xpath {
+    my ($mech, $query, %options) = @_;
+    my $timeout = delete $options{timeout} || 5;
+    my $start = Time::HiRes::time();
+    my $wantarray = wantarray;
+    my $call_f = $mech->xpath_future($query, %options);
+    my $timeout_f = $mech->sleep_future($timeout)->then(sub { Future->fail("Timeout during xpath search for $query") });
+    my $f = Future->wait_any($call_f, $timeout_f);
+    my $elapsed = Time::HiRes::time() - $start;
+    if ($elapsed > 0.1) {
+        Test::More::note(sprintf('xpath("%s") took %.3fs', $query, $elapsed));
+    }
+    if ($wantarray) {
+        return $f->get;
+    } else {
+        my @res = $f->get;
+        return $res[0];
+    }
+}
+
+sub safe_get {
+    my ($mech, $url, %options) = @_;
+    my $timeout = delete $options{timeout} || 10;
+    my $start = Time::HiRes::time();
+    my $wantarray = wantarray;
+    my $call_f = $mech->get_future($url, %options);
+    my $timeout_f = $mech->sleep_future($timeout)->then(sub { Future->fail("Timeout during navigation to $url") });
+    my $f = Future->wait_any($call_f, $timeout_f);
+    my $elapsed = Time::HiRes::time() - $start;
+    if ($elapsed > 0.1) {
+        Test::More::note(sprintf('get("%s") took %.3fs', $url, $elapsed));
+    }
+    if ($wantarray) {
+        return $f->get;
+    } else {
+        my @res = $f->get;
+        return $res[0];
+    }
+}
+
+sub safe_value {
+    my ($mech, @args) = @_;
+    my %options;
+    if (ref $args[-1] eq 'HASH') {
+        %options = %{pop @args};
+    }
+    my $timeout = delete $options{timeout} || 5;
+    my $name = shift @args;
+    my $index = shift @args;
+
+    my $start = Time::HiRes::time();
+    my $wantarray = wantarray;
+    my $call_f = $mech->get_set_value_future(
+        name => $name,
+        index => $index,
+        node => $mech->current_form,
+        %options
+    );
+    my $timeout_f = $mech->sleep_future($timeout)->then(sub { Future->fail("Timeout during value retrieval") });
+    my $f = Future->wait_any($call_f, $timeout_f);
+    my $elapsed = Time::HiRes::time() - $start;
+    if ($elapsed > 0.1) {
+        Test::More::note(sprintf('value("%s") took %.3fs', $name, $elapsed));
+    }
+    if ($wantarray) {
+        return $f->get;
+    } else {
+        my @res = $f->get;
+        return $res[0];
+    }
+}
+
+sub safe_field {
+    my ($mech, $name, $value, @args) = @_;
+    my %options;
+    if (@args and ref $args[-1] eq 'HASH') {
+        %options = %{pop @args};
+    }
+    my $timeout = delete $options{timeout} || 5;
+    my $index = shift @args;
+
+    my $start = Time::HiRes::time();
+    my $wantarray = wantarray;
+    my $call_f = $mech->field_future($name, $value, $index, @args);
+    my $timeout_f = $mech->sleep_future($timeout)->then(sub { Future->fail("Timeout during field setting") });
+    my $f = Future->wait_any($call_f, $timeout_f);
+    my $elapsed = Time::HiRes::time() - $start;
+    if ($elapsed > 0.1) {
+        Test::More::note(sprintf('field("%s") took %.3fs', $name, $elapsed));
+    }
+    if ($wantarray) {
+        return $f->get;
+    } else {
+        my @res = $f->get;
+        return $res[0];
+    }
+}
+
+sub safe_set_fields {
+    my ($mech, %fields) = @_;
+    my $timeout = 5;
+    my $start = Time::HiRes::time();
+    my $call_f = $mech->set_fields_future(%fields);
+    my $timeout_f = $mech->sleep_future($timeout)->then(sub { Future->fail("Timeout during set_fields") });
+    my $f = Future->wait_any($call_f, $timeout_f);
+    my $res = $f->get;
+    my $elapsed = Time::HiRes::time() - $start;
+    if ($elapsed > 0.1) {
+        Test::More::note(sprintf('set_fields took %.3fs', $elapsed));
+    }
+    return $res;
+}
+
+sub safe_content {
+    my ($mech, %options) = @_;
+    my $timeout = delete $options{timeout} || 10;
+    my $start = Time::HiRes::time();
+    my $call_f = $mech->content_future(%options);
+    my $timeout_f = $mech->sleep_future($timeout)->then(sub { Future->fail("Timeout during content retrieval") });
+    my $f = Future->wait_any($call_f, $timeout_f);
+    my $res = $f->get;
+    my $elapsed = Time::HiRes::time() - $start;
+    if ($elapsed > 0.1) {
+        Test::More::note(sprintf('content() took %.3fs', $elapsed));
+    }
+    return $res;
+}
+
+sub safe_decoded_content {
+    my ($mech, %options) = @_;
+    my $timeout = delete $options{timeout} || 10;
+    my $start = Time::HiRes::time();
+    my $call_f = $mech->decoded_content_future();
+    my $timeout_f = $mech->sleep_future($timeout)->then(sub { Future->fail("Timeout during decoded_content retrieval") });
+    my $f = Future->wait_any($call_f, $timeout_f);
+    my $res = $f->get;
+    my $elapsed = Time::HiRes::time() - $start;
+    if ($elapsed > 0.1) {
+        Test::More::note(sprintf('decoded_content() took %.3fs', $elapsed));
+    }
+    return $res;
+}
+
+sub set_watchdog {
+    my ($timeout_s) = @_;
+    my $name = (caller(1))[3] || 'Test';
+    $SIG{ALRM} = sub { 
+        Test::More::note("$name timed out after ${timeout_s}s!"); 
+        CORE::exit(1);
+    };
+    if( $^O =~ /mswin/i ) {
+        alarm($timeout_s);
+    } else {
+        # Use ualarm for sub-second precision if needed, but here we take seconds
+        Time::HiRes::ualarm($timeout_s * 1_000_000);
+    }
+}
+
 1;

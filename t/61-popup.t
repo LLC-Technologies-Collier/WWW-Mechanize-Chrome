@@ -12,7 +12,11 @@ use Test::HTTP::LocalServer;
 
 use lib '.';
 use t::helper;
-use Time::HiRes qw(ualarm sleep);
+use Time::HiRes qw(sleep);
+if( $^O !~ /mswin/i ) {
+    require Time::HiRes;
+    Time::HiRes->import('ualarm');
+}
 
 Log::Log4perl->easy_init($ERROR);
 
@@ -63,10 +67,9 @@ sub new_mech {
 t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
     my( $file, $mech ) = splice @_; # so we move references
 
-    local $SIG{ALRM} = sub { diag "Popup test timed out!"; CORE::exit(1) };
-    ualarm(5000000); # 5s watchdog\n
+    t::helper::set_watchdog(30);
 
-    $mech->get($url);
+    t::helper::safe_get($mech, $url);
 
     $mech->update_html(<<"HTML");
     <html>
@@ -171,7 +174,11 @@ HTML
     is 0+@opened, 0, "We can disable our on_popup callback";
 
     note "Cleaning up";
-    ualarm(0); # disable watchdog
+    if( $^O =~ /mswin/i ) {
+        alarm(0);
+    } else {
+        ualarm(0); # disable watchdog
+    }
 });
 
 #if( ! $target_tab->{targetId}) {

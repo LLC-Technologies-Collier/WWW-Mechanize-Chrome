@@ -42,7 +42,7 @@ t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
     my $res = $mech->get($site);
 
     for( 1..10 ) {
-        my @input = $mech->xpath('//input[@name="q"]');
+        my @input = t::helper::safe_xpath($mech, '//input[@name="q"]', all => 1);
     };
     is scalar @{ $mech->driver->listener->{'DOM.setChildNodes'} || []}, 0, "We don't accumulate listeners";
 

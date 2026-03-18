@@ -35,7 +35,7 @@ t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
 
     $mech->get('https://corion.net/style.css');
 
-    my $body = $mech->decoded_content();
+    my $body = t::helper::safe_decoded_content($mech);
 
     like $body, qr!^/\*!, "We retrieve the raw CSS";
 });

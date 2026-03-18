@@ -2679,11 +2679,9 @@ sub httpResponseFromChromeResponse( $self, $res ) {
     my $requestId = $res->{params}->{requestId};
 
     if( $requestId ) {
-        my $full_response_future;
-
         my $s = $self;
         weaken $s;
-        $full_response_future = $self->getResponseBody( $requestId )->then( sub( $body ) {
+        $response->{__body_future} = $self->getResponseBody( $requestId )->then( sub( $body ) {
             $s->log('debug', "Response body arrived");
 
             # We need to encode the body back to the appropriate bytes:
@@ -2700,10 +2698,8 @@ sub httpResponseFromChromeResponse( $self, $res ) {
             };
 
             $response->content( $body );
-            #undef $full_response_future;
             Future->done($body)
         })->retain;
-        #$response->content_ref( \$body );
     };
     $response
 };
@@ -3393,36 +3389,42 @@ sub document( $self ) {
 }
 
 sub decoded_content($self) {
-    my $res;
-    my $ct = $self->ct || 'text/html';
-    if( $ct eq 'text/html' ) {
-        $res = $self->_cached_document->then(sub( $root ) {
-            # Join _all_ child nodes together to also fetch DOCTYPE nodes
-            # and the stuff that comes after them
+    return $self->decoded_content_future()->get;
+}
 
-            my @content = map {
-                my $nodeId = $_->{nodeId};
-                $self->log('trace', "Fetching HTML for node " . $nodeId );
-                $self->target->send_message('DOM.getOuterHTML', nodeId => 0+$nodeId )
-            } @{ $root->{root}->{children} };
+sub decoded_content_future($self) {
+    return $self->content_type_future()->then(sub($ct = undef) {
+        $ct ||= 'text/html';
+        my $res;
+        if( $ct eq 'text/html' ) {
+            $res = $self->_cached_document->then(sub( $root = undef ) {
+                # Join _all_ child nodes together to also fetch DOCTYPE nodes
+                # and the stuff that comes after them
 
-            return Future->wait_all( @content )
-            ->then( sub( @outerHTML_f ) {
-                Future->done( join "", map { $_->get->{outerHTML} } @outerHTML_f );
+                my @content = map {
+                    my $nodeId = $_->{nodeId};
+                    $self->log('trace', "Fetching HTML for node " . $nodeId );
+                    $self->target->send_message('DOM.getOuterHTML', nodeId => 0+$nodeId )
+                } @{ $root->{root}->{children} };
+
+                return Future->wait_all( @content )
+                ->then( sub( @outerHTML_f ) {
+                    Future->done( join "", map { $_->get->{outerHTML} } @outerHTML_f );
+                });
             });
-        });
-    } else {
-        # Return the raw body
-        #use Data::Dumper;
-        #warn Dumper $self->response;
-        #warn $self->response->content;
-
-        # The content is already decoded (?!)
-        # I'm not sure how well this plays with encodings, and
-        # binary content
-        $res = Future->done($self->response->content);
-    };
-    return $res->get
+        } else {
+            # Return the raw body
+            my $response = $self->response;
+            if( $response and $response->{__body_future} ) {
+                $res = $response->{__body_future}->then( sub {
+                    Future->done( $response->content );
+                });
+            } else {
+                $res = Future->done($response ? $response->content : '');
+            };
+        };
+        return $res;
+    });
 };
 
 =head2 C<< $mech->content( %options ) >>
@@ -3451,18 +3453,23 @@ The allowed values are C<html> and C<text>. The default is C<html>.
 =cut
 
 sub content( $self, %options ) {
+    return $self->content_future(%options)->get;
+}
+
+sub content_future( $self, %options ) {
     $options{ format } ||= 'html';
     my $format = delete $options{ format };
 
-    my $content;
     if( 'html' eq $format ) {
-        $content= $self->decoded_content()
+        return $self->decoded_content_future()
     } elsif ( $format eq 'text' ) {
-        $content= $self->text;
+        return $self->text_future();
     } elsif ( $format eq 'mhtml' ) {
-        $content= $self->captureSnapshot()->{data};
+        return $self->captureSnapshot_future()->then(sub($res = undef) {
+            Future->done($res ? $res->{data} : undef);
+        });
     } else {
-        die qq{Unknown "format" parameter "$format"};
+        return Future->fail(qq{Unknown "format" parameter "$format"});
     };
 };
 
@@ -3476,11 +3483,21 @@ HTML, $mech will die.
 =cut
 
 sub text {
+    return $_[0]->text_future->get;
+}
+
+sub text_future {
     my $self = shift;
 
     # Waugh - this is highly inefficient but conveniently short to write
     # Maybe this should skip SCRIPT nodes...
-    join '', map { $_->get_attribute('innerText', live => 1) } $self->xpath('//body', single => 1 );
+    return $self->xpath_future('//body', single => 1 )->then(sub( $body = undef ) {
+        if( $body ) {
+            return $body->get_attribute_future('innerText', live => 1);
+        } else {
+            return Future->done('');
+        }
+    });
 }
 
 =head2 C<< $mech->captureSnapshot_future() >>
@@ -3625,20 +3642,52 @@ Returns the content type of the currently loaded document
 =cut
 
 sub content_type {
-    my ($self) = @_;
-    # Let's trust the <meta http-equiv first, and the header second:
-    # Also, a pox on Chrome for not having lower-case or upper-case
-    my $ct;
-    if(my( $meta )= $self->xpath( q{//meta[translate(@http-equiv,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz')="content-type"]}, first => 1 )) {
-        $ct= $meta->{attributes}->{'content'};
-    };
-    if(!$ct and my $r= $self->response ) {
+    return $_[0]->content_type_future->get;
+}
 
-        my $h= $r->headers;
-        $ct= $h->header('Content-Type');
-    };
-    $ct =~ s/;.*$// if defined $ct;
-    $ct
+sub content_type_future {
+    my ($self) = @_;
+    my $ct;
+
+    # 1. Trust response headers first (fastest)
+    if( my $r = $self->response ) {
+        my $h = $r->headers;
+        $ct = $h->header('Content-Type');
+    }
+
+    # 2. Check <meta http-equiv> via fast JS if not in headers
+    my $res_f;
+    if (!$ct || $ct =~ m!^text/html!i) {
+        $res_f = $self->eval_in_page_future(q{
+            (function() {
+                var m = document.querySelector('meta[http-equiv="content-type"]');
+                return m ? m.getAttribute('content') : null;
+            })()
+        })->then(sub($result = undef) {
+            my $meta_ct = $result ? $result->{result}->{value} : undef;
+            $ct = $meta_ct if $meta_ct;
+
+            # 3. Last resort: expensive global xpath (only if JS failed or returned nothing)
+            if (!$ct) {
+                return $self->xpath_future( q{//meta[translate(@http-equiv,'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz')="content-type"]}, first => 1 )
+                ->then(sub( $meta = undef ) {
+                    if( $meta ) {
+                        $ct= $meta->{attributes}->{'content'};
+                    };
+                    return Future->done($ct);
+                });
+            } else {
+                return Future->done($ct);
+            }
+        });
+    } else {
+        $res_f = Future->done($ct);
+    }
+
+    return $res_f->then(sub($final_ct = undef) {
+        $final_ct =~ s/;.*$// if defined $final_ct;
+        return Future->done($final_ct);
+    });
 };
 
 {
@@ -4489,6 +4538,17 @@ sub _performSearch( $self, %args ) {
 }
 
 sub xpath( $self, $query, %options) {
+    # Ensure xpath_future knows the context
+    $options{ wantarray } = wantarray;
+    if( wantarray ) {
+        return $self->xpath_future($query, %options)->get;
+    } else {
+        return scalar $self->xpath_future($query, %options)->get;
+    }
+}
+
+sub xpath_future( $self, $query, %options) {
+    my $wantarray = exists $options{ wantarray } ? delete $options{ wantarray } : wantarray;
     if ('ARRAY' ne (ref $query||'')) {
         $query = [$query];
     };
@@ -4518,7 +4578,7 @@ sub xpath( $self, $query, %options) {
             "You asked for many elements but seem to only want a single item.",
             "Did you forget to pass the 'single' option with a true value?",
             "Pass 'all => 1' to suppress this message and receive the count of items.",
-        ) if defined wantarray and !wantarray;
+        ) if defined $wantarray and !$wantarray;
     };
 
     my @res;
@@ -4532,7 +4592,7 @@ sub xpath( $self, $query, %options) {
 
     weaken(my $s = $self);
 
-    $doc->then( sub {
+    return $doc->then( sub {
         my $q = join "|", @$query;
 
         my @found;
@@ -4555,22 +4615,25 @@ sub xpath( $self, $query, %options) {
         #    warn "Found " . Dumper $_;
         #};
         push @res, @found;
-        Future->done( 1 );
-    })->get;
 
-    # Determine if we want only one element
-    #     or a list, like WWW::Mechanize::Chrome
+        # Determine if we want only one element
+        #     or a list, like WWW::Mechanize::Chrome
 
-    if (! $zero_allowed and @res == 0) {
-        $self->signal_condition( sprintf "No elements found for %s", $options{ user_info } );
-    };
-    if (! $two_allowed and @res > 1) {
-        #$self->highlight_node(@res);
-        warn $_->get_text() || '<no text>' for @res;
-        $self->signal_condition( sprintf "%d elements found for %s", (scalar @res), $options{ user_info } );
-    };
+        if (! $zero_allowed and @res == 0) {
+            $s->signal_condition( sprintf "No elements found for %s", $options{ user_info } );
+        };
+        if (! $two_allowed and @res > 1) {
+            #$self->highlight_node(@res);
+            warn $_->get_text() || '<no text>' for @res;
+            $s->signal_condition( sprintf "%d elements found for %s", (scalar @res), $options{ user_info } );
+        };
 
-    $return_first_element ? $res[$index] : @res
+        if( $return_first_element ) {
+            return Future->done( $res[ $index ] );
+        } else {
+            return Future->done( @res );
+        }
+    });
 }
 
 =head2 C<< $mech->by_id( $id, %options ) >>
@@ -5055,13 +5118,17 @@ are triggered.
 =cut
 
 sub field($self,$name,$value,$index=undef,$pre=undef,$post=undef) {
+    return $self->field_future($name,$value,$index,$pre,$post)->get;
+}
+
+sub field_future($self,$name,$value,$index=undef,$pre=undef,$post=undef) {
     if( ref $index ) { # old API
         carp "Old API style for ->field() is deprecated. Please fix the call to pass undef for the third parameter if using pre_events/post_events!";
         $post  = $pre;
         $pre   = $index;
         $index = undef;
     };
-    $self->get_set_value(
+    return $self->get_set_value_future(
         name => $name,
         value => $value,
         pre => $pre,
@@ -5222,6 +5289,10 @@ in addition to all keys that C<< $mech->xpath >> supports.
 =cut
 
 sub _field_by_name {
+    return $_[0]->_field_by_name_future(@_[1..$#_])->get;
+}
+
+sub _field_by_name_future {
     my ($self,%options) = @_;
     my @fields;
     my $name  = delete $options{ name };
@@ -5234,13 +5305,12 @@ sub _field_by_name {
         $attr = 'class'
     };
     if (blessed $name) {
-        @fields = $name;
+        return Future->done($name);
     } else {
         _default_limiter( single => \%options );
         my $query = $self->element_query([qw[input select textarea]], { $attr => $name });
-        @fields = $self->xpath($query,%options);
+        return $self->xpath_future($query,%options);
     };
-    @fields
 }
 
 =head2 C<< $mech->set_field( %options ) >>
@@ -5256,6 +5326,10 @@ of a E<lt>formE<gt> tag.
 =cut
 
 sub set_field($self, %options ) {
+    return $self->set_field_future(%options)->get;
+}
+
+sub set_field_future($self, %options ) {
     my $value = delete $options{ value };
     my $pre   = delete $options{pre};
     $pre = [$pre]
@@ -5285,8 +5359,9 @@ sub set_field($self, %options ) {
     };
 
     # Send pre-change events:
+    my @pre_f;
     for my $ev (@$pre) {
-        $self->target->send_message(
+        push @pre_f, $self->target->send_message(
                 'Runtime.callFunctionOn',
                 objectId => $id,
                 functionDeclaration => <<'JS',
@@ -5303,18 +5378,19 @@ JS
             );
     };
 
-    if( 'value' eq $method ) {
-        $self->target->send_message('DOM.setAttributeValue', nodeId => 0+$obj->nodeId, name => 'value', value => "$value" )->get;
+    return Future->wait_all( @pre_f )->then(sub {
+        if( 'value' eq $method ) {
+            return $self->target->send_message('DOM.setAttributeValue', nodeId => 0+$obj->nodeId, name => 'value', value => "$value" );
 
-    } elsif( 'selected' eq $method ) {
-        # ignoring undef; but [] would reset to no option
-        if (defined $value) {
+        } elsif( 'selected' eq $method ) {
+            # ignoring undef; but [] would reset to no option
+            if (defined $value) {
 
-            $value = [ $value ] unless ref $value;
-            $self->target->send_message(
-                'Runtime.callFunctionOn',
-                objectId => $id,
-                functionDeclaration => <<'JS',
+                $value = [ $value ] unless ref $value;
+                return $self->target->send_message(
+                    'Runtime.callFunctionOn',
+                    objectId => $id,
+                    functionDeclaration => <<'JS',
 function(newValue) {
   var i, j;
   if (this.multiple == true) {
@@ -5331,31 +5407,32 @@ function(newValue) {
   }
 }
 JS
-                arguments => [{ value => $value }],
-            )->get;
-        }
-    } elsif( 'checked' eq $method ) {
-        if (defined $value) {
-            $value = [ $value ] unless ref $value;
-            $obj->set_attribute('checked' => JSON::true);
-        }
-    } elsif( 'content' eq $method ) {
-        $self->target->send_message('Runtime.callFunctionOn',
-            objectId => $id,
-            functionDeclaration => 'function(newValue) { this.innerHTML = newValue }',
-            arguments => [{ value => $value }]
-        )->get;
-    } else {
-        die "Don't know how to set the value for node '$tag', sorry";
-    };
-
-    # Send post-change events
-    # Send pre-change events:
-    for my $ev (@$post) {
-        $self->target->send_message(
-                'Runtime.callFunctionOn',
+                    arguments => [{ value => $value }],
+                );
+            }
+        } elsif( 'checked' eq $method ) {
+            if (defined $value) {
+                $value = [ $value ] unless ref $value;
+                $obj->set_attribute('checked' => JSON::true);
+            }
+        } elsif( 'content' eq $method ) {
+            return $self->target->send_message('Runtime.callFunctionOn',
                 objectId => $id,
-                functionDeclaration => <<'JS',
+                functionDeclaration => 'function(newValue) { this.innerHTML = newValue }',
+                arguments => [{ value => $value }]
+            );
+        } else {
+            die "Don't know how to set the value for node '$tag', sorry";
+        };
+        return Future->done();
+    })->then(sub {
+        # Send post-change events:
+        my @post_f;
+        for my $ev (@$post) {
+            push @post_f, $self->target->send_message(
+                    'Runtime.callFunctionOn',
+                    objectId => $id,
+                    functionDeclaration => <<'JS',
 function(ev) {
     var event = new Event(ev, {
         view : window,
@@ -5365,12 +5442,24 @@ function(ev) {
     this.dispatchEvent(event);
 }
 JS
-                arguments => [{ value => $ev }],
-            );
-    };
+                    arguments => [{ value => $ev }],
+                );
+        };
+        Future->wait_all( @post_f );
+    });
 }
 
 sub get_set_value($self,%options) {
+    $options{ wantarray } = wantarray;
+    if( wantarray ) {
+        return $self->get_set_value_future(%options)->get;
+    } else {
+        return scalar $self->get_set_value_future(%options)->get;
+    }
+}
+
+sub get_set_value_future($self,%options) {
+    my $wantarray = exists $options{ wantarray } ? delete $options{ wantarray } : wantarray;
     my $set_value = exists $options{ value };
     my $value = delete $options{ value };
     my $pre   = delete $options{pre};
@@ -5399,38 +5488,41 @@ sub get_set_value($self,%options) {
             $index_name = "${index}th ";
         }
     };
-    my @fields = $self->_field_by_name(
+    return $self->_field_by_name_future(
                      name => $name,
                      user_info => "${index_name}input with name '$name'",
                      index     => $index,
-                     %options );
+                     %options )->then(sub(@fields) {
 
     if (my $obj = $fields[0]) {
-
+        my $f;
         if ($set_value) {
-            $self->set_field(
+            $f = $self->set_field_future(
                 field => $obj,
                 value => $value,
                 pre => $pre,
                 post => $post,
             );
+        } else {
+            $f = Future->done();
         };
 
-        # Don't bother to fetch the field's value if it's not wanted
-        return unless defined wantarray;
+        return $f->then(sub {
+            # Don't bother to fetch the field's value if it's not wanted
+            return Future->done() unless defined $wantarray;
 
-        # We could save some work here for the simple case of single-select
-        # dropdowns by not enumerating all options
-        my $tag = $obj->get_tag_name();
-        if ('SELECT' eq uc $tag) {
-            my $id = $obj->objectId;
-                if( ! $id ) {
-                    warn "No object id for nodeId " . $obj->nodeId;
-                };
-            my $arr = $self->target->send_message(
-                    'Runtime.callFunctionOn',
-                    objectId => $id,
-                    functionDeclaration => <<'JS',
+            # We could save some work here for the simple case of single-select
+            # dropdowns by not enumerating all options
+            my $tag = $obj->get_tag_name();
+            if ('SELECT' eq uc $tag) {
+                my $id = $obj->objectId;
+                    if( ! $id ) {
+                        warn "No object id for nodeId " . $obj->nodeId;
+                    };
+                return $self->target->send_message(
+                        'Runtime.callFunctionOn',
+                        objectId => $id,
+                        functionDeclaration => <<'JS',
 function() {
   var i;
   var arr = [];
@@ -5442,21 +5534,20 @@ function() {
   return arr;
 }
 JS
-                    arguments => [],
-                    returnByValue => JSON::true)->get->{result};
-
-            my @values = @{$arr->{value}};
-            if (wantarray) {
-                return @values
+                        arguments => [],
+                        returnByValue => JSON::true)->then(sub($res) {
+                    my $arr = $res->{result};
+                    my @values = @{$arr->{value}};
+                    return Future->done( @values );
+                });
             } else {
-                return $values[0];
-            }
-        } else {
-            return $obj->get_attribute('value', live => 1);
-        };
+                return Future->done( $obj->get_attribute('value', live => 1) );
+            };
+        });
     } else {
-        return
+        return Future->done();
     }
+    });
 }
 
 =head2 C<< $mech->select( $name, $value ) >>
@@ -5780,17 +5871,26 @@ has the field value and its number as the 2 elements.
 =cut
 
 sub set_fields($self, %fields) {;
+    return $self->set_fields_future(%fields)->get;
+};
+
+sub set_fields_future($self, %fields) {;
     my $f = $self->current_form;
     if (! $f) {
         croak "Can't set fields: No current form set.";
     };
-    $self->do_set_fields(form => $f, fields => \%fields);
+    return $self->do_set_fields_future(form => $f, fields => \%fields);
 };
 
 sub do_set_fields($self, %options) {
+    return $self->do_set_fields_future(%options)->get;
+}
+
+sub do_set_fields_future($self, %options) {
     my $form = delete $options{ form };
     my $fields = delete $options{ fields };
 
+    my @f;
     while (my($n,$v) = each %$fields) {
         my $index = undef;
         if (ref $v) {
@@ -5798,8 +5898,9 @@ sub do_set_fields($self, %options) {
             $index = $num;
         };
 
-        $self->get_set_value( node => $form, name => $n, value => $v, index => $index, %options );
+        push @f, $self->get_set_value_future( node => $form, name => $n, value => $v, index => $index, %options );
     }
+    return Future->wait_all( @f );
 };
 
 =head1 CONTENT MONITORING METHODS
@@ -6200,6 +6301,7 @@ sub _saveResourceTree( $self, $tree, $names, $seen, $wanted, $save, $base_dir ) 
                         my @content = map {
                             my $nodeId = $_->{nodeId};
                             $self->target->send_message('DOM.getOuterHTML', nodeId => 0+$nodeId )
+                            ->else(sub { Future->done({ outerHTML => '' }) })
                         } @{ $root->{root}->{children} || [] };
 
                         return Future->wait_all( @content )
@@ -6219,7 +6321,7 @@ sub _saveResourceTree( $self, $tree, $names, $seen, $wanted, $save, $base_dir ) 
                 #warn "Will save $res->{url}";
                 $fetch = $fetch->then( $save )->else(sub {
                     my $err = "@_";
-                    if( $err =~ /Resource was not cached/i and $res->{url} =~ /^file:/ ) {
+                    if( $err =~ /Resource was not cached/i and $res->{url} =~ /^file:/i ) {
                         # Local file:// resources are known to be flaky in headless Chromium caches
                         warn "Could not save local resource $res->{url}: Resource was not cached\n";
                         return Future->done();
@@ -6238,9 +6340,7 @@ sub _saveResourceTree( $self, $tree, $names, $seen, $wanted, $save, $base_dir ) 
             };
         };
 
-        return Future->wait_all( @requested )->catch(sub {
-            warn $@;
-        });
+        return Future->wait_all( @requested );
 }
 
 # Allow the options to specify whether to filter duplicates here
@@ -6302,12 +6402,20 @@ sub saveResources_future( $self, %options ) {
               target_dir => $target_dir,
         maybe wanted => $options{ wanted },
               save => sub( $resource ) {
-        # For mime/html targets without a name, use the title?!
-        # Rewrite all HTML, CSS links
-
         # We want to store the top HTML under the name passed in (!)
-        $names{ $resource->{url} } ||= File::Spec->catfile( $target_dir, $names{ $resource->{url} });
-        my $target = $names{ $resource->{url} }
+        # For other resources, they were already prepended with $target_dir in _saveResourceTree
+        # but if we have a custom 'wanted' filter that includes something not in the tree,
+        # or if names were passed in, we might need to fix it here.
+
+        my $name = $names{ $resource->{url} };
+        if( $name and ! File::Spec->file_name_is_absolute( $name ) ) {
+            # Only prepend if it's not already absolute
+            # and it's not the top-level target file (which should be at the top level)
+            if( $resource->{url} ne $s->uri ) {
+                $name = File::Spec->catfile( $target_dir, $name );
+            }
+        }
+        my $target = $name
             or die "Don't have a filename for URL '$resource->{url}' ?!";
         $s->log( 'debug', "Saving '$resource->{url}' to '$target'" );
         open my $fh, '>', $target
@@ -6331,15 +6439,33 @@ sub saveResources_future( $self, %options ) {
 }
 
 sub filenameFromUrl( $self, $url, $extension ) {
-    my $target = URI->new( $url )->path;
+    my $uri = URI->new( $url );
+    my $target = $uri->path;
 
-    $target =~ s![\&\?\<\>\{\}\|\:\*]!_!g;
-    $target =~ s!.*[/\\]!!;
+    # Replace characters that are illegal in Windows filenames
+    # We also replace slashes because we only want the last component
+    $target =~ s![\&\?\<\>\{\}\|\:\*\"\\\/\t\n\r]!_!g;
 
-    # Add/change extension here
+    # Get just the filename part (after the last underscore if any)
+    $target =~ s!.*_!!;
 
-    if( length $target > 240 ) {
-        $target = substr( $target, 0, 240 );
+    if( ! $target ) {
+        $target = 'index';
+    }
+
+    $extension //= '';
+    if( $extension and $target !~ /\Q$extension\E$/i ) {
+        $target .= $extension;
+    }
+
+    # Windows MAX_PATH is 260. A safe component length is ~150 to allow for directory overhead.
+    if( length $target > 150 ) {
+        if( $target =~ /^(.*)(\.[^.]+)$/ ) {
+            my ($base, $ext) = ($1, $2);
+            $target = substr($base, 0, 150 - length($ext)) . $ext;
+        } else {
+            $target = substr( $target, 0, 150 );
+        }
     }
 
     return $target

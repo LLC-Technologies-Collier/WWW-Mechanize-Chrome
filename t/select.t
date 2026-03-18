@@ -58,13 +58,13 @@ $form = $mech->current_form();
 
 # pass multiple values to a multi select
 $mech->select('multilist', \@sendmulti);
-@return = $mech->value('multilist');
+@return = t::helper::safe_value($mech, 'multilist', { all => 1 });
 is_deeply(\@return, \@sendmulti, 'multi->multi value is ' . join(' ', @sendmulti));
 
 $response = $mech->get_local( 'select.html' );
 ok( $response->is_success, "Fetched select.html" );
 $mech->select('multilist', \%sendmulti);
-@return = $mech->value('multilist');
+@return = t::helper::safe_value($mech, 'multilist', { all => 1 });
 is_deeply(\@return, \@sendmulti, 'multi->multi value is ' . join(' ', @sendmulti));
 
 # pass a single value to a multi select
@@ -72,13 +72,13 @@ $response = $mech->get_local( 'select.html' );
 ok( $response->is_success, "Fetched select.html" );
 $mech->select('multilist', $sendsingle);
 #$return = $form->param('multilist');
-$return = $mech->value('multilist');
+$return = t::helper::safe_value($mech, 'multilist', { all => 1 });
 is($return, $sendsingle, "single->multi value is '$sendsingle'");
 
 $response = $mech->get_local( 'select.html' );
 ok( $response->is_success, "Fetched select.html" );
 $mech->select('multilist', \%sendsingle);
-$return = $mech->value('multilist');
+$return = t::helper::safe_value($mech, 'multilist', { all => 1 });
 is($return, $sendsingle, "single->multi value is '$sendsingle'");
 
 
@@ -88,13 +88,13 @@ is($return, $sendsingle, "single->multi value is '$sendsingle'");
 $response = $mech->get_local( 'select.html' );
 ok( $response->is_success, "Fetched select.html" );
 $mech->select('singlelist', \@sendmulti);
-@return = $mech->value('singlelist');
+@return = t::helper::safe_value($mech, 'singlelist');
 is_deeply(\@return, \@singlereturn, 'multi->single value is ' . join(' ', @singlereturn));
 
 $response = $mech->get_local( 'select.html' );
 ok( $response->is_success, "Fetched select.html" );
 $mech->select('singlelist', \%sendmulti);
-@return = $mech->value('singlelist');
+@return = t::helper::safe_value($mech, 'singlelist');
 is_deeply(\@return, \@singlereturn, 'multi->single value is ' . join(' ', @singlereturn));
 
 
@@ -102,13 +102,13 @@ is_deeply(\@return, \@singlereturn, 'multi->single value is ' . join(' ', @singl
 $response = $mech->get_local( 'select.html' );
 ok( $response->is_success, "Fetched select.html" );
 $rv = $mech->select('singlelist', $sendsingle);
-$return = $mech->value('singlelist');
+$return = t::helper::safe_value($mech, 'singlelist');
 is($return, $sendsingle, "single->single value is '$sendsingle'");
 
 $response = $mech->get_local( 'select.html' );
 ok( $response->is_success, "Fetched select.html" );
 $rv = $mech->select('singlelist', \%sendsingle);
-$return = $mech->value('singlelist');
+$return = t::helper::safe_value($mech, 'singlelist');
 is($return, $sendsingle, "single->single value is '$sendsingle'");
 
 # test return value from $mech->select
