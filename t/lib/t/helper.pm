@@ -380,12 +380,12 @@ sub safe_value {
     my $start = Time::HiRes::time();
     my $wantarray = wantarray;
     $options{ wantarray } = $wantarray;
-    my $call_f = $mech->get_set_value_future(
-        name => $name,
-        index => $index,
-        node => $mech->current_form,
-        %options
-    );
+    my $call_f;
+    if (defined $index) {
+        $call_f = $mech->value_future($name, $index, %options);
+    } else {
+        $call_f = $mech->value_future($name, %options);
+    }
     my $timeout_f = $mech->sleep_future($timeout)->then(sub { Future->fail("Timeout during value retrieval") });
     my $f = Future->wait_any($call_f, $timeout_f);
     my $elapsed = Time::HiRes::time() - $start;

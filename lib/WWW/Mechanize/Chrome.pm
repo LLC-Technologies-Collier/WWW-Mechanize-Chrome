@@ -5604,32 +5604,34 @@ sub value {
 
 sub value_future {
     my $self = shift;
+    my $name = shift;
+    my $index;
+    my %options;
+
+    if (@_ == 1 and ref $_[0] eq 'HASH') {
+        %options = %{$_[0]};
+    } elsif (@_ == 1 and $_[0] =~ /^\d+$/) {
+        $index = shift;
+    } elsif (@_ % 2 == 0 and @_ > 0) {
+        %options = @_;
+    } elsif (@_ >= 2) {
+        $index = shift;
+        %options = @_;
+    }
+
     weaken(my $s = $self);
-    if (@_ == 2) {
-        my ($name,$index) = @_;
-
-        if( defined $index and $index !~ /^\d+$/ ) {
-            $self->signal_condition("Non-numeric index passed to ->value(). Did you mean to call ->field('$name' => '$index') ?");
-        };
-
-        return $self->current_form_future->then(sub($form) {
-            return $s->get_set_value_future(
-                node => $form,
-                index => $index,
-                name => $name,
-            );
-        });
-
-    } else {
-        my ($name,%options) = @_;
-        return $self->current_form_future->then(sub($form) {
-            return $s->get_set_value_future(
-                node => $form,
-                %options,
-                name => $name,
-            );
-        });
+    if( defined $index and $index !~ /^\d+$/ ) {
+        $self->signal_condition("Non-numeric index passed to ->value(). Did you mean to call ->field('$name' => '$index') ?");
     };
+
+    return $self->current_form_future->then(sub($form) {
+        return $s->get_set_value_future(
+            node => $form,
+            index => $index,
+            %options,
+            name => $name,
+        );
+    });
 };
 
 =head2 C<< $mech->get_set_value( %options ) >>
