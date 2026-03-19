@@ -29,10 +29,16 @@ our $VERSION = '0.77';
 The attributes this node has
 
 =cut
-
 has 'attributes' => (
-    is => 'lazy',
+    is => 'rw',
     default => sub { {} },
+    coerce => sub {
+        my $v = shift;
+        if( ref $v eq 'ARRAY' ) {
+            return { @$v };
+        };
+        return $v
+    },
 );
 
 =head2 C<nodeName>
@@ -91,9 +97,17 @@ Another id of this node within Chrome
 =cut
 
 has 'objectId' => (
-    is => 'lazy',
-    default => sub { $_[0]->objectId_future->get },
+    is => 'rw',
 );
+
+around objectId => sub {
+    my $orig = shift;
+    my $self = shift;
+    if( @_ ) {
+        return $self->$orig(@_);
+    }
+    return $self->{objectId} // $self->objectId_future->get;
+};
 
 sub objectId_future($self) {
     return $self->_fetchObjectId;

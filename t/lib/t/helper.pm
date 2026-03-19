@@ -274,6 +274,16 @@ sub safe_xpath {
     }
 }
 
+sub safe_sleep {
+    my ($mech, $seconds) = @_;
+    my $start = Time::HiRes::time();
+    $mech->sleep_future($seconds)->get;
+    my $elapsed = Time::HiRes::time() - $start;
+    if ($elapsed > 0.1) {
+        Test::More::note(sprintf('sleep(%.3fs) took %.3fs', $seconds, $elapsed));
+    }
+}
+
 sub safe_current_form {
     my ($mech, %options) = @_;
     my $timeout = delete $options{timeout} || ($is_slow ? 90 : 10);

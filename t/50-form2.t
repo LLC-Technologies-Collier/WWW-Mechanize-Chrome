@@ -51,7 +51,7 @@ t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
     t::helper::safe_get_local($mech, '50-form2.html');
     t::helper::safe_form_id($mech, 'snd2');
     ok t::helper::safe_current_form($mech), "After setting form_id, We have a current form";
-    $mech->sleep(0.1); # why is this here?!
+    t::helper::safe_sleep($mech, 0.1); # why is this here?!
     is t::helper::safe_get_attribute($mech, t::helper::safe_current_form($mech), 'id'), 'snd2', "We can ask the form with get_attribute(id)";
     my $content = t::helper::safe_get_attribute($mech, t::helper::safe_current_form($mech), 'innerHTML');
     ok !!$content, "We got content from asking the current form with get_attribute";
@@ -121,7 +121,7 @@ t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
     t::helper::safe_field($mech, 'quickcomment', 2);
     pass "We survived setting the field 'quickcomment' to 2";
     
-    $mech->sleep(1) if $^O =~ /mswin/i;
+    t::helper::safe_sleep($mech, 1) if $^O =~ /mswin/i;
     note "Getting value of 'quickcomment'";
     my @result = t::helper::safe_value($mech, 'quickcomment');
     cmp_bag \@result, [2], "->field returned bag 2";
@@ -132,7 +132,7 @@ t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
     t::helper::safe_form_with_fields($mech, 'multic');
     ok t::helper::safe_current_form($mech), "We can find a form by its contained multi-select fields";
     
-    $mech->sleep(1) if $^O =~ /mswin/i;
+    t::helper::safe_sleep($mech, 1) if $^O =~ /mswin/i;
     note "Getting initial value of 'multic'";
     @result = t::helper::safe_value($mech, 'multic', { all => 1 });
     cmp_bag \@result, [2,2,3], "->field returned bag 2,2,3";
@@ -142,7 +142,7 @@ t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
     t::helper::safe_field($mech, 'multic', [1,2]);
     pass "We survived setting the field 'multic' to 1,2";
     
-    $mech->sleep(1) if $^O =~ /mswin/i;
+    t::helper::safe_sleep($mech, 1) if $^O =~ /mswin/i;
     note "Verifying set value of 'multic'";
     @result = t::helper::safe_value($mech, 'multic', { all => 1 });
     cmp_bag \@result, [1,1,2,2], "->field returned bag 1,1,2,2";
@@ -158,7 +158,7 @@ t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
     };
     is $ok, 1, "We survived setting the second date field"
         or diag $@;
-    $mech->sleep(1) if $^O =~ /mswin/i;
+    t::helper::safe_sleep($mech, 1) if $^O =~ /mswin/i;
     @result = t::helper::safe_value($mech, 'date', 2);
     is_deeply \@result, ['2020-04-04'], "We set the second date field";
 
