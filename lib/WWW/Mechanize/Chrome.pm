@@ -5944,6 +5944,7 @@ sub select_future($self, $name, $value) {
     return $self->_field_by_name_future(
         node => $self->current_form,
         name => $name,
+        maybe => 1,
         #%options,
     )->then(sub {
         my ($field) = @_;
