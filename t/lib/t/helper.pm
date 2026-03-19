@@ -48,6 +48,7 @@ use Test::HTTP::LocalServer;
 use Config;
 use Time::HiRes qw(sleep time);
 use POSIX qw(:sys_wait_h);
+use IO::Socket::INET;
 
 use Log::Log4perl ':easy';
 
@@ -180,7 +181,12 @@ sub browser_instances {
 };
 
 sub default_unavailable {
-    return !scalar browser_instances;
+    my @instances = browser_instances();
+    if (!@instances) {
+        $@ = "No Chrome executables found in PATH or standard locations.";
+        return 1;
+    }
+    return 0;
 };
 
 sub runtests {
@@ -520,6 +526,57 @@ sub safe_update_html {
     my $elapsed = Time::HiRes::time() - $start;
     if ($elapsed > 0.1) {
         Test::More::note(sprintf('update_html() took %.3fs', $elapsed));
+    }
+    return $res;
+}
+
+sub safe_wait_for_ready {
+    my ($mech, %options) = @_;
+    my $timeout = delete $options{timeout} || 10;
+    my $start = Time::HiRes::time();
+    
+    my $call_f = repeat {
+        $mech->eval_future("document.readyState")->then(sub {
+            my ($res) = @_;
+            my ($state, $type) = $mech->_process_eval_result($res);
+            if ($state eq 'complete') {
+                return Future->done(1);
+            } else {
+                return $mech->sleep_future(0.2)->then(sub { Future->done(undef) });
+            }
+        });
+    } while => sub {
+        my ($f) = @_;
+        ! $f->get
+    };
+
+    my $timeout_f = $mech->sleep_future($timeout)->then(sub { Future->fail("Timeout during wait_for_ready") });
+    my $f = Future->wait_any($call_f, $timeout_f);
+    my $res = $f->get;
+    my $elapsed = Time::HiRes::time() - $start;
+    if ($elapsed > 0.1) {
+        Test::More::note(sprintf('wait_for_ready() took %.3fs', $elapsed));
+    }
+    return $res;
+}
+
+sub safe_follow_link {
+    my ($mech, @args) = @_;
+    my %options;
+    if( @args == 1 and ref $args[0] eq 'HASH' ) {
+        %options = %{ $args[0] };
+    } elsif( @args % 2 == 0 and @args > 0 and not ref $args[0] ) {
+        %options = @args;
+    }
+    my $timeout = delete $options{timeout} || 10;
+    my $start = Time::HiRes::time();
+    my $call_f = $mech->follow_link_future(@args);
+    my $timeout_f = $mech->sleep_future($timeout)->then(sub { Future->fail("Timeout during follow_link") });
+    my $f = Future->wait_any($call_f, $timeout_f);
+    my $res = $f->get;
+    my $elapsed = Time::HiRes::time() - $start;
+    if ($elapsed > 0.1) {
+        Test::More::note(sprintf('follow_link() took %.3fs', $elapsed));
     }
     return $res;
 }
@@ -973,6 +1030,7 @@ sub safe_server {
     die "Failed to spawn Test::HTTP::LocalServer after 3 retries: $err";
 }
 
+our $watchdog_socket;
 sub set_watchdog {
     my ($timeout_s) = @_;
     my $name = (caller(1))[3] || 'Test';
@@ -985,13 +1043,40 @@ sub set_watchdog {
     };
 
     if( $^O =~ /mswin/i ) {
-        # Spawn a background killer that doesn't inherit our handles.
-        # Use administrator via SSH because 'dev' cannot kill its own process
-        # sometimes on this specific host (AD2).
-        my $cmd = qq{perl -e "sleep $timeout_s; if(kill(0, $target_pid)){ print STDERR qq(\\nWatchdog: Terminating hung process $target_pid after $timeout_s s\\n); system(qq(ssh -i C:/Users/dev.AD2/.ssh/id_rsa -o StrictHostKeyChecking=no administrator\@100.64.79.66 \\"taskkill /F /T /PID $target_pid\\")); kill(9, $target_pid); }"};
-        system(1, qq{$cmd >NUL 2>&1});
+        # Create a socket for self-cancelling watchdog
+        my $listener = IO::Socket::INET->new(
+            LocalAddr => '127.0.0.1',
+            LocalPort => 0,
+            Listen    => 1,
+            Reuse     => 1,
+        ) or die "Could not create watchdog socket: $!";
+        my $port = $listener->sockport;
         
-        Test::More::note("Watchdog enabled ($timeout_s s) for PID $target_pid");
+        # Spawn the killer. 
+        # 1. Connects to the port.
+        # 2. Sets its own alarm.
+        # 3. Blocks on read. 
+        # If main process dies, killer's read returns 0 and it exits.
+        # If killer's alarm hits, it kills the main process.
+        
+        my $cmd = "perl -MIO::Socket::INET -e \" " .
+                  "\\\$SIG{ALRM} = sub { " .
+                  "  print STDERR qq{\\nWatchdog firing for $target_pid after $timeout_s s\\n}; " .
+                  "  system(qq{ssh -i C:/Users/dev.AD2/.ssh/id_rsa -o StrictHostKeyChecking=no administrator\\\@100.64.79.66 \\\"taskkill /F /T /PID $target_pid\\\"}); " .
+                  "  kill(9, $target_pid); " .
+                  "  exit " .
+                  "}; " .
+                  "alarm($timeout_s); " .
+                  "my \\\$s = IO::Socket::INET->new(PeerAddr=>'127.0.0.1', PeerPort=>$port); " .
+                  "if (\\\$s) { \\\$s->read(my \\\$buf, 1); } " .
+                  "exit;\"";
+        
+        if (my $kpid = system(1, $cmd)) {
+            # Killer spawned
+        }
+        $watchdog_socket = $listener; # Keep it alive to keep the connection
+        
+        Test::More::note("Watchdog enabled ($timeout_s s) for PID $target_pid (socket-based)");
         alarm($timeout_s);
     } else {
         # Use ualarm for sub-second precision if needed, but here we take seconds

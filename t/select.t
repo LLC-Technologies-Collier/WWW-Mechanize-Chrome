@@ -4,10 +4,6 @@
 use strict;
 use Test::More;
 
-BEGIN {
-    delete @ENV{qw(PATH IFS CDPATH ENV BASH_ENV)};  # Placates taint-unsafe Cwd.pm in 5.6.1
-}
-
 use Log::Log4perl qw(:easy);
 
 use WWW::Mechanize::Chrome;

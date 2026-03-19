@@ -2497,7 +2497,7 @@ sub _mightNavigate( $self, $get_navigation_future, %options ) {
     })->then( sub {
         my $f;
         my @events;
-        if( !$options{ intrapage } and $navigated ) {
+        if( ($options{ synchronize } // 1) and !$options{ intrapage } and $navigated ) {
             $f = $does_navigation->then( sub {
                 @events = @_;
                 # Handle all the events, by turning them into a ->response again
@@ -2512,10 +2512,10 @@ sub _mightNavigate( $self, $get_navigation_future, %options ) {
                 Future->done( \@events )
             })
         } else {
-            $self->log('trace', "No navigation occurred, not collecting events");
-            $does_navigation->cancel;
+            $self->log('trace', "No navigation occurred or synchronization disabled, not collecting events");
+            $does_navigation->cancel if $does_navigation;
             $f = Future->done(\@events);
-            $scheduled->cancel;
+            $scheduled->cancel if $scheduled;
             undef $scheduled;
         };
 
@@ -4231,15 +4231,22 @@ things like C<A> tags.
 =cut
 
 sub follow_link {
+    my ($self,%opts) = @_;
+    return $self->follow_link_future(%opts)->get;
+}
+
+sub follow_link_future {
     my ($self,$link,%opts);
     if (@_ == 2) { # assume only a link parameter
         ($self,$link) = @_;
-        $self->click($link);
+        return $self->click_future($link);
     } else {
         ($self,%opts) = @_;
         _default_limiter( one => \%opts );
-        $link = $self->find_link_dom(%opts);
-        $self->click({ dom => $link, %opts });
+        weaken(my $s = $self);
+        return $self->find_link_dom_future(%opts)->then(sub($link) {
+            return $s->click_future({ dom => $link, %opts });
+        });
     }
 }
 

@@ -413,9 +413,10 @@ sub get_attribute_future( $self, $attribute, %options ) {
         });
 
     } else {
-        if( ! $options{ live } and $s->{attributes} and ref $s->{attributes} eq 'HASH' ) {
-            if( exists $s->attributes->{ $attribute } ) {
-                return Future->done( $s->attributes->{ $attribute } );
+        if( ! $options{ live } ) {
+            my $attrs = $s->attributes;
+            if( exists $attrs->{ $attribute } ) {
+                return Future->done( $attrs->{ $attribute } );
             };
         };
         #warn "Fetching '$attribute'";
@@ -453,9 +454,7 @@ sub set_attribute_future( $self, $attribute, $value ) {
                 nodeId => 0+$nodeId
             )
         })->then(sub {
-            if( $s->{attributes} and ref $s->{attributes} eq 'HASH' ) {
-                $s->attributes->{ $attribute } = $value;
-            };
+            $s->attributes->{ $attribute } = $value;
             return Future->done($s);
         });
 
@@ -467,9 +466,7 @@ sub set_attribute_future( $self, $attribute, $value ) {
                 nodeId => 0+$nodeId
             )
         })->then(sub {
-            if( $s->{attributes} and ref $s->{attributes} eq 'HASH' ) {
-                delete $s->attributes->{ $attribute };
-            };
+            delete $s->attributes->{ $attribute };
             return Future->done($s);
         });
     }
