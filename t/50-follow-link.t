@@ -57,27 +57,27 @@ t::helper::run_across_instances(\@instances, \&new_mech, 9, sub {
     # Xpath
     t::helper::safe_get_local($mech, '50-click.html');
     $mech->allow('javascript' => 1);
-    $mech->follow_link( xpath => '//*[@id="a_link"]', synchronize=>0, );
+    t::helper::safe_follow_link($mech, xpath => '//*[@id="a_link"]', synchronize=>0, );
     ($clicked,$type) = t::helper::safe_eval_in_page($mech, 'clicked');
     is $clicked, 'a_link', "->follow_link() with an xpath selector works";
 
     # CSS
     t::helper::safe_get_local($mech, '50-click.html');
     $mech->allow('javascript' => 1);
-    $mech->follow_link( selector => '#a_link', synchronize=>0, );
+    t::helper::safe_follow_link($mech, selector => '#a_link', synchronize=>0, );
     ($clicked,$type) = t::helper::safe_eval_in_page($mech, 'clicked');
     is $clicked, 'a_link', "->follow_link() with a CSS selector works";
 
     # Regex
     t::helper::safe_get_local($mech, '50-click.html');
     $mech->allow('javascript' => 1);
-    $mech->follow_link( text_regex => qr/A link/, synchronize => 0 );
+    t::helper::safe_follow_link($mech, text_regex => qr/A link/, synchronize => 0 );
     ($clicked,$type) = t::helper::safe_eval_in_page($mech, 'clicked');
     is $clicked, 'a_link', "->follow_link() with a RE works";
 
     # Non-existing link
     t::helper::safe_get_local($mech, '50-click.html');
-    my $lives = eval { $mech->follow_link('foobar'); 1 };
+    my $lives = eval { t::helper::safe_follow_link($mech,'foobar'); 1 };
     my $msg = $@;
     ok !$lives, "->follow_link() on non-existing parameter fails correctly";
     like $msg, qr/No elements found for Button with name 'foobar'/,
@@ -85,7 +85,7 @@ t::helper::run_across_instances(\@instances, \&new_mech, 9, sub {
 
     # Non-existing link via CSS selector
     t::helper::safe_get_local($mech, '50-click.html');
-    $lives = eval { $mech->follow_link({ selector => 'foobar' }); 1 };
+    $lives = eval { t::helper::safe_follow_link($mech,{ selector => 'foobar' }); 1 };
     $msg = $@;
     ok !$lives, "->follow_link() on non-existing parameter fails correctly";
     like $msg, qr/No elements found for CSS selector 'foobar'/,
