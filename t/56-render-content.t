@@ -49,7 +49,7 @@ t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
 
     isa_ok $mech, 'WWW::Mechanize::Chrome';
 
-    $mech->get_local('50-click.html');
+    t::helper::safe_get_local($mech, '50-click.html');
     for my $test ( @tests ) {
         my $format= $test->{format};
         my $content= eval { t::helper::safe_render_content($mech, format => $format ); };

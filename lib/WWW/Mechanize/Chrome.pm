@@ -1915,8 +1915,7 @@ sub eval_in_page_future($self,$str, %options) {
     return $self->target->evaluate("$str", %options);
 }
 
-sub eval_in_page( $self, $str, %options) {
-    my $result = $self->eval_in_page_future("$str", %options)->get;
+sub _process_eval_result( $self, $result ) {
     if( $result->{error} ) {
         $self->signal_condition(
             join "\n", grep { defined $_ }
@@ -1937,6 +1936,11 @@ sub eval_in_page( $self, $str, %options) {
     } else {
         return $result->{result}, $result->{result}->{type};
     }
+}
+
+sub eval_in_page( $self, $str, %options) {
+    my $result = $self->eval_in_page_future("$str", %options)->get;
+    return $self->_process_eval_result($result);
 };
 
 {
@@ -2589,17 +2593,12 @@ sub _local_url( $self, $htmlfile, %options ) {
 }
 
 sub get_local( $self, $htmlfile, %options ) {
+    return $self->get_local_future($htmlfile, %options)->get;
+}
+
+sub get_local_future( $self, $htmlfile, %options ) {
     my $url = $self->_local_url( $htmlfile, %options );
-    my $res = $self->get($url, %options);
-    ## Chrome is not helpful with its error messages for local URLs
-    #if( 0+$res->headers->header_field_names and ([$res->headers->header_field_names]->[0] ne 'x-www-mechanize-Chrome-fake-success' or $self->uri ne 'about:blank')) {
-    #    # We need to fake the content headers from <meta> tags too...
-    #    # Maybe this even needs to go into ->get()
-    #    $res->code( 200 );
-    #} else {
-    #    $res->code( 400 ); # Must have been "not found"
-    #};
-    $res
+    return $self->get_future($url, %options);
 }
 
 sub httpRequestFromChromeRequest( $self, $event ) {
@@ -2991,13 +2990,16 @@ current request.
 =cut
 
 sub reload( $self, %options ) {
+    return $self->reload_future(%options)->get;
+}
+
+sub reload_future( $self, %options ) {
     if( exists $options{ ignoreCache } ) {
         $options{ ignoreCache } = $options{ ignoreCache } ? JSON::true : JSON::false;
     };
-    $self->_mightNavigate( sub {
+    return $self->_mightNavigate( sub {
         $self->target->send_message('Page.reload', %options )
-    }, navigates => 1, %options)
-    ->get;
+    }, navigates => 1, %options);
 }
 
 =head2 C<< $mech->set_download_directory( $dir ) >>
@@ -3239,14 +3241,17 @@ Returns the (new) response.
 =cut
 
 sub back( $self, %options ) {
-    $self->_mightNavigate( sub {
+    return $self->back_future(%options)->get;
+};
+
+sub back_future( $self, %options ) {
+    return $self->_mightNavigate( sub {
         $self->target->send_message('Page.getNavigationHistory')->then(sub($history) {
             my $entry = $history->{entries}->[ $history->{currentIndex}-1 ];
             $self->target->send_message('Page.navigateToHistoryEntry', entryId => $entry->{id})
         });
-    }, navigates => 1, %options)
-    ->get;
-};
+    }, navigates => 1, %options);
+}
 
 =head2 C<< $mech->forward() >>
 
@@ -3259,13 +3264,16 @@ Returns the (new) response.
 =cut
 
 sub forward( $self, %options ) {
-    $self->_mightNavigate( sub {
+    return $self->forward_future(%options)->get;
+}
+
+sub forward_future( $self, %options ) {
+    return $self->_mightNavigate( sub {
         $self->target->send_message('Page.getNavigationHistory')->then(sub($history) {
             my $entry = $history->{entries}->[ $history->{currentIndex}+1 ];
             $self->target->send_message('Page.navigateToHistoryEntry', entryId => $entry->{id})
         });
-    }, navigates => 1, %options)
-    ->get;
+    }, navigates => 1, %options);
 }
 
 =head2 C<< $mech->stop() >>
@@ -3327,45 +3335,62 @@ scrolling page like so:
 =cut
 
 sub infinite_scroll {
+    my $self = shift;
+    return $self->infinite_scroll_future(@_)->get;
+}
+
+sub infinite_scroll_future {
     my $self        = shift;
     my $wait_time   = shift || 20;
+    weaken(my $s = $self);
 
-    my $current_height = $self->_get_body_height;
-    $self->log('debug', "Current page body height: $current_height");
-
-    $self->_scroll_to_bottom;
-
-    my $new_height = $self->_get_body_height;
-    $self->log('debug', "New page body height: $new_height");
-
-    my $start_time = time();
-    while (!($new_height > $current_height)) {
-
-        # wait for new elements to load until $wait_time is reached
-        if (time() - $start_time > $wait_time) {
-          return 0;
-        }
-
-        # wait 1/10th sec for new elements to load
-        $self->sleep(0.1);
-        $new_height = $self->_get_body_height;
-    }
-    return 1;
+    return $self->_get_body_height_future->then(sub($current_height = undef) {
+        $s->log('debug', "Current page body height: $current_height");
+        return $s->_scroll_to_bottom_future->then(sub {
+            my $start_time = time();
+            return repeat {
+                $s->_get_body_height_future->then(sub($new_height = undef) {
+                    $s->log('debug', "New page body height: $new_height");
+                    if ($new_height > $current_height) {
+                        return Future->done(1);
+                    }
+                    if (time() - $start_time > $wait_time) {
+                        return Future->done(0);
+                    }
+                    return $s->sleep_future(0.1)->then(sub { Future->done(undef) });
+                });
+            } while => sub($f) { not defined $f->get };
+        });
+    });
 }
 
 sub _get_body_height {
     my $self = shift;
+    return $self->_get_body_height_future->get;
+}
 
-    my ($height) = $self->eval( 'document.body.scrollHeight' );
-    return $height;
+sub _get_body_height_future {
+    my $self = shift;
+    weaken(my $s = $self);
+    return $self->eval_future( 'document.body.scrollHeight' )->then(sub($res = undef) {
+        my ($height, $type) = $s->_process_eval_result($res);
+        return Future->done($height);
+    });
 }
 
 sub _scroll_to_bottom {
     my $self = shift;
+    return $self->_scroll_to_bottom_future->get;
+}
 
+sub _scroll_to_bottom_future {
+    my $self = shift;
+    weaken(my $s = $self);
     # scroll to bottom and wait for some content to load
-    $self->eval( 'window.scroll(0,document.body.scrollHeight + 200)' );
-    $self->sleep(0.1);
+    return $self->eval_future( 'window.scroll(0,document.body.scrollHeight + 200)' )
+    ->then(sub($res) {
+        return $s->sleep_future(0.1);
+    });
 }
 
 =head1 CONTENT METHODS
@@ -3824,12 +3849,22 @@ sub make_link {
 
 sub links {
     my ($self) = @_;
-    my @links = $self->selector( (join ",", sort keys %link_spec), wantarray => 1);
-    my $base = $self->base;
-    return map {
-        $self->make_link($_,$base)
-    } @links;
+    my $wantarray = wantarray;
+    my @res = $self->links_future->get;
+    return $wantarray ? @res : \@res;
 };
+
+sub links_future {
+    my ($self) = @_;
+    weaken(my $s = $self);
+    return $self->selector_future( (join ",", sort keys %link_spec), wantarray => 1 )
+    ->then(sub(@links) {
+        my $base = $s->base;
+        return Future->done( map {
+            $s->make_link($_,$base)
+        } @links );
+    });
+}
 
 =head2 C<< $mech->selector( $css_selector, %options ) >>
 
@@ -3980,7 +4015,12 @@ sub _match_any_link_params( $self, $link, $p ) {
 
 sub find_link_dom {
     my ($self,%opts) = @_;
-    $opts{ wantarray } = wantarray if ! exists $opts{ all } and ! exists $opts{ wantarray };
+    return $self->find_link_dom_future(%opts)->get;
+}
+
+sub find_link_dom_future {
+    my ($self,%opts) = @_;
+    my $wantarray = exists $opts{ wantarray } ? delete $opts{ wantarray } : wantarray;
     my %xpath_options;
 
     # Clean up some legacy stuff
@@ -4050,34 +4090,36 @@ sub find_link_dom {
             }  (@tags);
     #warn $q;
 
-    my @res = $self->xpath($q, %opts, all => 1, wantarray => 1 );
+    weaken(my $s = $self);
+    return $self->xpath_future($q, %opts, all => 1, wantarray => 1 )->then(sub(@res) {
 
-    if (keys %opts) {
-        # post-filter the remaining links
-        # for all the options we don't support with XPath
-        my $base = $self->base;
+        if (keys %opts) {
+            # post-filter the remaining links
+            # for all the options we don't support with XPath
+            my $base = $s->base;
 
-        @res = grep {
-            $self->_match_any_link_params($self->make_link($_,$base),\%opts);
-        } @res;
-    };
+            @res = grep {
+                $s->_match_any_link_params($s->make_link($_,$base),\%opts);
+            } @res;
+        };
 
-    if ($one) {
-        if (0 == @res) { $self->signal_condition( "No link found matching '$q'" )};
-        if ($single) {
-            if (1 <  @res) {
-                $self->highlight_node(@res);
-                $self->signal_condition(
-                    sprintf "%d elements found found matching '%s'", scalar @res, $q
-                );
+        if ($one) {
+            if (0 == @res) { $s->signal_condition( "No link found matching '$q'" )};
+            if ($single) {
+                if (1 <  @res) {
+                    $s->highlight_node(@res);
+                    $s->signal_condition(
+                        sprintf "%d elements found found matching '%s'", scalar @res, $q
+                    );
+                };
             };
         };
-    };
 
-    if ($n eq 'all') {
-        return @res
-    };
-    $res[$n]
+        if ($n eq 'all') {
+            return Future->done( $wantarray ? @res : \@res )
+        };
+        return Future->done($res[$n]);
+    });
 }
 
 =head2 C<< $mech->find_link( %options ) >>
@@ -4123,14 +4165,24 @@ This defaults to not look through child frames.
 
 sub find_all_links {
     my ($self, %opts) = @_;
-    $opts{ n } = 'all';
-    my $base = $self->base;
-    my @matches = map {
-        $self->make_link($_, $base);
-    } $self->find_all_links_dom( frames => 0, %opts );
-    return @matches if wantarray;
-    return \@matches;
+    $opts{ wantarray } = wantarray;
+    return $self->find_all_links_future(%opts)->get;
 };
+
+sub find_all_links_future {
+    my ($self, %opts) = @_;
+    my $wantarray = exists $opts{ wantarray } ? delete $opts{ wantarray } : wantarray;
+    $opts{ n } = 'all';
+    weaken(my $s = $self);
+    return $self->find_all_links_dom_future( %opts, wantarray => 1 )
+    ->then(sub(@matches) {
+        my $base = $s->base;
+        my @res = map {
+            $s->make_link($_, $base);
+        } @matches;
+        return Future->done( $wantarray ? @res : \@res );
+    });
+}
 
 =head2 C<< $mech->find_all_links_dom %options >>
 
@@ -4149,10 +4201,19 @@ This defaults to not look through child frames.
 
 sub find_all_links_dom {
     my ($self,%opts) = @_;
+    $opts{ wantarray } = wantarray;
+    return $self->find_all_links_dom_future(%opts)->get;
+};
+
+sub find_all_links_dom_future {
+    my ($self,%opts) = @_;
+    my $wantarray = exists $opts{ wantarray } ? delete $opts{ wantarray } : wantarray;
     $opts{ n } = 'all';
-    my @matches = $self->find_link_dom( frames => 0, %opts, wantarray => 1 );
-    return @matches if wantarray;
-    return \@matches;
+    $opts{ wantarray } = 1;
+    return $self->find_link_dom_future( frames => 0, %opts )
+    ->then(sub(@matches) {
+        return Future->done( $wantarray ? @matches : \@matches );
+    });
 };
 
 =head2 C<< $mech->follow_link( $link ) >>
@@ -4869,6 +4930,11 @@ the parameters to search much like for the C<find_link> calls.
 
 sub click {
     my ($self,$name,$x,$y) = @_;
+    return $self->click_future($name, (ref $name eq 'HASH' ? %$name : ()) )->get;
+}
+
+sub click_future {
+    my ($self,$name,$x,$y) = @_;
     my %options;
     my @buttons;
 
@@ -4887,36 +4953,43 @@ sub click {
     };
 
     if (exists $options{ name }) {
-        $name = quotemeta($options{ name }|| '');
+        my $nm = quotemeta($options{ name }|| '');
         $options{ xpath } = [
-                       sprintf( q{//*[(translate(local-name(.), "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")="button" and @name="%s") or (translate(local-name(.), "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")="input" and (@type="button" or @type="submit" or @type="image") and @name="%s")]}, $name, $name),
+                       sprintf( q{//*[(translate(local-name(.), "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")="button" and @name="%s") or (translate(local-name(.), "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")="input" and (@type="button" or @type="submit" or @type="image") and @name="%s")]}, $nm, $nm),
         ];
         if ($options{ name } eq '') {
             push @{ $options{ xpath }},
                        q{//*[(translate(local-name(.), "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz") = "button" or translate(local-name(.), "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz")="input") and @type="button" or @type="submit" or @type="image"]},
             ;
         };
-        $options{ user_info } = "Button with name '$name'";
+        $options{ user_info } = "Button with name '$options{name}'";
     };
 
+    my $buttons_f;
     if ($options{ dom }) {
-        @buttons = $options{ dom };
+        $buttons_f = Future->done($options{ dom });
     } else {
-        @buttons = $self->_option_query(%options);
+        $buttons_f = $self->_option_query_future(%options);
     };
 
-    # Get the node as an object so we can find its position and send the clicks:
-    $self->log('trace', sprintf "Resolving nodeId %d to object for clicking", $buttons[0]->nodeId );
-    my $id = $buttons[0]->objectId;
-    #warn Dumper $self->target->send_message('Runtime.getProperties', objectId => $id)->get;
-    #warn Dumper $self->target->send_message('Runtime.callFunctionOn', objectId => $id, functionDeclaration => 'function() { this.focus(); }', arguments => [])->get;
+    weaken( my $s = $self );
+    return $buttons_f->then(sub($box) {
+        my $target = ref $box eq 'ARRAY' ? $box->[0] : $box;
+        if( ! $target ) {
+            $s->signal_condition($options{ user_info } || "Unknown button");
+            return Future->done();
+        }
 
-    $self->_mightNavigate( sub {
-        $self->target->send_message('Runtime.callFunctionOn', objectId => $id, functionDeclaration => 'function() { this.click(); }', arguments => [])
-    }, %options)
-    ->get;
-
-    return $self->response;
+        # Get the node as an object so we can find its position and send the clicks:
+        $s->log('trace', sprintf "Resolving nodeId %d to object for clicking", $target->nodeId );
+        return $target->objectId_future->then(sub($id) {
+            return $s->_mightNavigate( sub {
+                $s->target->send_message('Runtime.callFunctionOn', objectId => $id, functionDeclaration => 'function() { this.click(); }', arguments => [])
+            }, %options);
+        })->then(sub {
+            return Future->done($s->response);
+        });
+    });
 }
 
 # Internal method to run either an XPath, CSS or id query against the DOM
@@ -4997,6 +5070,10 @@ C<selector> or C<xpath>, consider using C<< ->click >> instead.
 =cut
 
 sub click_button($self,%options) {
+    return $self->click_button_future(%options)->get;
+}
+
+sub click_button_future($self,%options) {
     my $node;
     my $xpath;
     my $user_message;
@@ -5019,18 +5096,26 @@ sub click_button($self,%options) {
         $xpath = sprintf '//*[translate(local-name(.), "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz") = "button" or (translate(local-name(.), "ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz") = "input" and @type="submit")][%s]', $v;
         $user_message = "Button number '$v' out of range";
     };
-    $node ||= $self->xpath( $xpath,
+
+    my $node_f;
+    if ($node) {
+        $node_f = Future->done($node);
+    } else {
+        $node_f = $self->xpath_future( $xpath,
                           node => $self->current_form,
                           single => 1,
                           user_message => $user_message,
               );
-    if ($node) {
-        $self->click({ dom => $node, %options });
-    } else {
+    }
 
-        $self->signal_condition($user_message);
-    };
-
+    return $node_f->then(sub($node) {
+        if ($node) {
+            return $self->click_future({ dom => $node, %options });
+        } else {
+            $self->signal_condition($user_message);
+            return Future->done();
+        };
+    });
 }
 
 =head1 FORM METHODS
@@ -5053,9 +5138,15 @@ and on calls to C<< ->submit() >> and C<< ->submit_with_fields >>.
 
 sub current_form {
     my( $self, %options )= @_;
-    # Find the first <FORM> element from the currently active element
-    $self->form_number(1) unless $self->{current_form};
-    $self->{current_form};
+    return $self->current_form_future(%options)->get;
+}
+
+sub current_form_future {
+    my( $self, %options )= @_;
+    if ($self->{current_form}) {
+        return Future->done($self->{current_form});
+    }
+    return $self->form_number_future(1, %options);
 }
 
 sub clear_current_form {
@@ -5069,16 +5160,20 @@ sub invalidate_cached_values($self) {
 
 sub active_form {
     my( $self, %options )= @_;
+    return $self->active_form_future(%options)->get;
+}
+
+sub active_form_future {
+    my( $self, %options )= @_;
     # Find the first <FORM> element from the currently active element
-    my $focus= $self->target->get_active_element;
+    return $self->target->get_active_element->then(sub($focus) {
+        if( !$focus ) {
+            # warn "No active element, hence no active form";
+            return Future->done();
+        };
 
-    if( !$focus ) {
-        warn "No active element, hence no active form";
-        return
-    };
-
-    my $form= $self->xpath( './ancestor-or-self::FORM', node => $focus, maybe => 1 );
-
+        return $self->xpath_future( './ancestor-or-self::FORM', node => $focus, maybe => 1 );
+    });
 }
 
 =head2 C<< $mech->dump_forms( [$fh] ) >>
@@ -5902,14 +5997,26 @@ sub tick_future($self, $name, $value=undef, $set=1) {
 
     return $box_f->then(sub($box) {
         my $target = ref $box eq 'ARRAY' ? $box->[0] : $box;
+        weaken(my $s = $self);
+        # Use property for state check as it's the live state
         return $target->get_attribute_future( 'checked', live => 1 )->then(sub($attr_val) {
-            my $is_set = ($attr_val || '') eq 'checked';
+            # Map attribute/property to boolean
+            my $is_set = (defined $attr_val and $attr_val ne 'false' and $attr_val ne '0' and $attr_val ne '');
+            
             if ($set xor $is_set) {
-                if ($set) {
-                    return $target->set_attribute_future('checked', 'checked');
-                } else {
-                    return $target->set_attribute_future('checked', undef);
-                };
+                # Update both property and attribute via JS for atomicity
+                return $target->objectId_future->then(sub($id) {
+                    return $s->target->send_message('Runtime.callFunctionOn',
+                        functionDeclaration => sprintf('function() { this.checked = %s; if(%s) { this.setAttribute("checked", "checked") } else { this.removeAttribute("checked") }; return this.checked; }', ($set ? 'true' : 'false'), ($set ? 'true' : 'false')),
+                        objectId => $id,
+                        returnByValue => JSON::true,
+                    );
+                })->then(sub($res) {
+                    # Explicitly update the library's internal cache
+                    return $target->set_attribute_future('checked', $set ? 'checked' : undef);
+                })->then(sub {
+                    return Future->done($target);
+                });
             };
             return Future->done($target);
         });
@@ -5950,25 +6057,32 @@ by C<< $mech->current_form >>.
 =cut
 
 sub submit($self,$dom_form = $self->current_form) {
+    return $self->submit_future($dom_form)->get;
+}
+
+sub submit_future($self,$dom_form = undef) {
+    $dom_form ||= $self->current_form;
     if ($dom_form) {
         # We should prepare for navigation here as well
         # The __proto__ invocation is so we can have a HTML form field entry
         # named "submit"
 
-        $self->_mightNavigate( sub {
-            $self->target->send_message(
-                'Runtime.callFunctionOn',
-                objectId => $dom_form->objectId,
-                functionDeclaration => 'function() { var action = this.action; var isCallable = action && typeof(action) === "function"; if( isCallable) { action() } else { this.__proto__.submit.apply(this) }}'
-            );
-        })
-        ->get;
-
-        $self->invalidate_cached_values;
+        weaken(my $s = $self);
+        return $dom_form->objectId_future->then(sub($id) {
+            return $s->_mightNavigate( sub {
+                $s->target->send_message(
+                    'Runtime.callFunctionOn',
+                    objectId => $id,
+                    functionDeclaration => 'function() { var action = this.action; var isCallable = action && typeof(action) === "function"; if( isCallable) { action() } else { this.__proto__.submit.apply(this) }}'
+                );
+            });
+        })->then(sub {
+            $s->invalidate_cached_values;
+            return Future->done($s->response);
+        });
     } else {
         croak "I don't know which form to submit, sorry.";
     }
-    return $self->response;
 };
 
 =head2 C<< $mech->submit_form( %options ) >>
@@ -6017,41 +6131,48 @@ will be ignored.
 
 =cut
 
-sub submit_form($self,%options) {;
+sub submit_form($self,%options) {
+    return $self->submit_form_future(%options)->get;
+}
 
+sub submit_form_future($self,%options) {
     my $form = delete $options{ form };
     my $fields;
+    my $form_f;
     if (! $form) {
         if ($fields = delete $options{ with_fields }) {
             my @names = keys %$fields;
-            $form = $self->form_with_fields( \%options, @names );
-            if (! $form) {
-                $self->signal_condition("Couldn't find a matching form for @names.");
-                return
-            };
+            $form_f = $self->form_with_fields_future( \%options, @names )
+            ->then(sub($f) {
+                if (! $f) {
+                    $self->signal_condition("Couldn't find a matching form for @names.");
+                    return Future->fail("Form not found");
+                };
+                return Future->done($f);
+            });
         } else {
             $fields = delete $options{ fields } || {};
-            $form = $self->current_form;
+            $form_f = Future->done($self->current_form);
         };
+    } else {
+        $form_f = Future->done($form);
     };
 
-    if (! $form) {
-        $self->signal_condition("No form found to submit.");
-        return
-    };
-    #warn Dumper $fields;
-    #$self->log('debug', sprintf 'Submitting form %s with fields %s', $form->{id}, Dumper $fields);
-    $self->do_set_fields( form => $form, fields => $fields );
-
-    my $response;
-    if ( $options{button} ) {
-        $response = $self->click( $options{button}, $options{x} || 0, $options{y} || 0 );
-    }
-    else {
-        $response = $self->submit();
-    }
-    return $response;
-
+    weaken(my $s = $self);
+    return $form_f->then(sub($form) {
+        if (! $form) {
+            $s->signal_condition("No form found to submit.");
+            return Future->fail("No form");
+        };
+        return $s->do_set_fields_future( form => $form, fields => $fields )
+        ->then(sub {
+            if ( $options{button} ) {
+                return $s->click_future( $options{button}, $options{x} || 0, $options{y} || 0 );
+            } else {
+                return $s->submit_future($form);
+            }
+        });
+    });
 }
 
 =head2 C<< $mech->set_fields( $name => $value, ... ) >>
@@ -6428,13 +6549,47 @@ sub _content_as_png($self, $rect={}, $target={} ) {
 };
 
 
-sub content_as_png($self, $rect={}, $target={}) {
-    return $self->content_as_png_future( $rect, $target )->get;
+sub content_as_png($self, @args) {
+    return $self->content_as_png_future( @args )->get;
 };
 
-sub content_as_png_future($self, $rect={}, $target={}) {
-    $self->_content_as_png( $rect, $target )->then(sub($img) {
-        Future->done( $self->_as_raw_png( $img ) );
+sub content_as_png_future($self, @args) {
+    my ($rect, $target, %options);
+    if( @args == 1 and ref $args[0] eq 'HASH' ) {
+        if (exists $args[0]->{left} or exists $args[0]->{top} or exists $args[0]->{width} or exists $args[0]->{height}) {
+            $rect = $args[0];
+        } else {
+            %options = %{ $args[0] };
+        }
+    } elsif( @args % 2 == 0 and @args > 0 and defined $args[0] and not ref $args[0] and $args[0] =~ /^(?:filename|timeout)/ ) {
+        %options = @args;
+    } else {
+        ($rect, $target, %options) = @args;
+    };
+    $rect //= {};
+    $target //= {};
+
+    if( not exists $options{filename}
+        and defined $rect
+        and not ref $rect
+        and $rect ne '{}'
+        and $rect ne ''
+        and $rect !~ /^(?:filename|timeout)/ ) {
+        # legacy call with single filename argument?
+        $options{ filename } = $rect;
+        $rect = {};
+    };
+
+    my $filename = delete $options{ filename };
+
+    return $self->_content_as_png( $rect, $target )->then(sub($img) {
+        my $payload = $self->_as_raw_png( $img );
+        if( defined $filename ) {
+            open my $fh, '>:raw', $filename
+                or croak "Couldn't create '$filename': $!";
+            print {$fh} $payload;
+        };
+        return Future->done( $payload );
     });
 }
 
@@ -6771,9 +6926,13 @@ Returns PNG image data for a single element
 
 sub element_as_png {
     my ($self, $element) = @_;
-
-    $self->render_element( element => $element, format => 'png' )
+    return $self->element_as_png_future($element)->get;
 };
+
+sub element_as_png_future {
+    my ($self, $element) = @_;
+    return $self->render_element_future( element => $element, format => 'png' );
+}
 
 =head2 C<< $mech->render_element( %options ) >>
 
@@ -6796,36 +6955,45 @@ C<< element_coordinates >> if you need exactly the element.
 
 sub render_element {
     my ($self, %options) = @_;
+    return $self->render_element_future(%options)->get;
+}
+
+sub render_element_future {
+    my ($self, %options) = @_;
     my $element= delete $options{ element }
         or croak "No element given to render.";
 
-    my $cliprect = $self->element_coordinates( $element );
-    my $res = Future->wait_all(
-        #$self->target->send_message('Emulation.setVisibleSize', width => int $cliprect->{width}, height => int $cliprect->{height} ),
-        $self->target->send_message(
-            'Emulation.forceViewport',
-            'y' => int $cliprect->{top},
-            'x' => int $cliprect->{left},
-            scale => 1.0
-        ),
-    )->then(sub {
-        $self->_content_as_png()->then( sub( $img ) {
-            my $element = $img->crop(
-                left => 0,
-                top => 0,
-                width => $cliprect->{width},
-                height => $cliprect->{height});
-            Future->done( $self->_as_raw_png( $element ));
-        })
-    })->get;
-
-    Future->wait_all(
-        #$self->target->send_message('Emulation.setVisibleSize', width => $cliprect->{width}, height => $cliprect->{height} ),
-        $self->target->send_message('Emulation.resetViewport'),
-    )->get;
-
-    $res
-};
+    weaken(my $s = $self);
+    my $cliprect;
+    return $self->element_coordinates_future( $element )->then(sub($crect) {
+        $cliprect = $crect;
+        return Future->wait_all(
+            #$self->target->send_message('Emulation.setVisibleSize', width => int $cliprect->{width}, height => int $cliprect->{height} ),
+            $s->target->send_message(
+                'Emulation.forceViewport',
+                'y' => int $cliprect->{top},
+                'x' => int $cliprect->{left},
+                scale => 1.0
+            ),
+        );
+    })->then(sub {
+        return $s->_content_as_png();
+    })->then( sub( $img ) {
+        my $element_img = $img->crop(
+            left => 0,
+            top => 0,
+            width => $cliprect->{width},
+            height => $cliprect->{height});
+        my $res = $s->_as_raw_png( $element_img );
+        
+        return $s->target->send_message('Emulation.resetViewport')->else(sub {
+            # Some versions of Chrome or environments might not support this
+            return Future->done();
+        })->then(sub {
+            return Future->done($res);
+        });
+    });
+}
 
 =head2 C<< $mech->element_coordinates( $element ) >>
 
@@ -6843,7 +7011,14 @@ towards rendering HTML.
 
 sub element_coordinates {
     my ($self, $element) = @_;
-    my $cliprect = $self->target->send_message('Runtime.callFunctionOn', objectId => $element->objectId, functionDeclaration => <<'JS', arguments => [], returnByValue => JSON::true)->get->{result}->{value};
+    return $self->element_coordinates_future($element)->get;
+}
+
+sub element_coordinates_future {
+    my ($self, $element) = @_;
+    weaken(my $s = $self);
+    return $element->objectId_future->then(sub($id) {
+        return $s->target->send_message('Runtime.callFunctionOn', objectId => $id, functionDeclaration => <<'JS', arguments => [], returnByValue => JSON::true);
     function() {
         var r = this.getBoundingClientRect();
         return {
@@ -6854,7 +7029,11 @@ sub element_coordinates {
         }
     }
 JS
-};
+    })->then(sub($res) {
+        return Future->done($res->{result}->{value});
+    });
+}
+;
 
 =head2 C<< $mech->render_content(%options) >>
 
@@ -6932,20 +7111,42 @@ our %PaperFormats = (
     a6      =>  {width =>  4.13, height =>  5.83 },
 );
 
-sub content_as_pdf($self, %options) {
-    return $self->content_as_pdf_future(%options)->get;
+sub content_as_pdf($self, @args) {
+    return $self->content_as_pdf_future(@args)->get;
 }
 
-sub content_as_pdf_future($self, %options) {
+sub content_as_pdf_future($self, @args) {
+    my ($rect, $target, %options);
+    if( @args == 1 and ref $args[0] eq 'HASH' ) {
+        %options = %{ $args[0] };
+    } elsif( @args % 2 == 0 and @args > 0 and defined $args[0] and not ref $args[0] and $args[0] =~ /^(?:filename|format|paper)/ ) {
+        %options = @args;
+    } else {
+        ($rect, $target, %options) = @args;
+    };
+    $rect //= {};
+    $target //= {};
+
+    if( not exists $options{filename} 
+        and defined $rect 
+        and not ref $rect 
+        and $rect ne '{}' 
+        and $rect ne '' 
+        and $rect !~ /^(?:filename|format|paper)/ ) {
+        # legacy call with single filename argument?
+        $options{ filename } = $rect;
+        $rect = {};
+    };
+
+    my $filename = delete $options{ filename };
+
     if( my $format = delete $options{ format }) {
         my $wh = $PaperFormats{ lc $format }
             or croak "Unknown paper format '$format'";
         @options{'paperWidth','paperHeight'} = @{$wh}{'width','height'};
     };
 
-    my $filename = delete $options{ filename };
-
-    $self->target->send_message('Page.printToPDF', %options)->then(sub($res) {
+    return $self->target->send_message('Page.printToPDF', %options)->then(sub($res) {
         my $base64 = $res->{data};
         my $payload = decode_base64( $base64 );
         if( defined $filename ) {

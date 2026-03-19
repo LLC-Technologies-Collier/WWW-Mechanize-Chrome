@@ -92,8 +92,12 @@ Another id of this node within Chrome
 
 has 'objectId' => (
     is => 'lazy',
-    default => sub { $_[0]->_fetchObjectId()->get },
+    default => sub { $_[0]->objectId_future->get },
 );
+
+sub objectId_future($self) {
+    return $self->_fetchObjectId;
+}
 
 =head2 C<driver>
 
@@ -324,8 +328,8 @@ sub _fetch_attribute_eval( $self, $attribute ) {
             returnByValue => JSON::true
         )
     })
-    ->then(sub($res) {
-        my $val = $res->{result}->{value};
+    ->then(sub($_res) {
+        my $val = $_res->{result}->{value};
         return Future->done( _false_to_undef( $val ))
     });
 }
@@ -409,6 +413,11 @@ sub get_attribute_future( $self, $attribute, %options ) {
         });
 
     } else {
+        if( ! $options{ live } and $s->{attributes} and ref $s->{attributes} eq 'HASH' ) {
+            if( exists $s->attributes->{ $attribute } ) {
+                return Future->done( $s->attributes->{ $attribute } );
+            };
+        };
         #warn "Fetching '$attribute'";
         return $s->_fetch_attribute($attribute);
     }
@@ -432,6 +441,7 @@ need to refetch all other nodes or receive stale values.
 
 sub set_attribute_future( $self, $attribute, $value ) {
     my $s = $self;
+    weaken $s;
     my $r;
     if( defined $value ) {
         $r = $s->_fetchNodeId()
@@ -442,7 +452,12 @@ sub set_attribute_future( $self, $attribute, $value ) {
                 value => ''.$value,
                 nodeId => 0+$nodeId
             )
-        })
+        })->then(sub {
+            if( $s->{attributes} and ref $s->{attributes} eq 'HASH' ) {
+                $s->attributes->{ $attribute } = $value;
+            };
+            return Future->done($s);
+        });
 
     } else {
         $r = $s->_fetchNodeId()
@@ -451,7 +466,12 @@ sub set_attribute_future( $self, $attribute, $value ) {
                 name => $attribute,
                 nodeId => 0+$nodeId
             )
-        })
+        })->then(sub {
+            if( $s->{attributes} and ref $s->{attributes} eq 'HASH' ) {
+                delete $s->attributes->{ $attribute };
+            };
+            return Future->done($s);
+        });
     }
     return $r
 }

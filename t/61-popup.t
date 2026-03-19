@@ -67,11 +67,11 @@ sub new_mech {
 t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
     my( $file, $mech ) = splice @_; # so we move references
 
-    t::helper::set_watchdog(30);
+    t::helper::set_watchdog(60);
 
     t::helper::safe_get($mech, $url);
 
-    $mech->update_html(<<"HTML");
+    t::helper::safe_update_html($mech, <<"HTML");
     <html>
     <title>Test page with popup</title>
     <body><a href="javascript:window.open('$url')" id="launch_popup">Pop up</a>
@@ -103,7 +103,7 @@ HTML
     #    );
     #})->get;
     note "Launching Javascript popup";
-    $mech->click({ selector => "#launch_popup" });
+    t::helper::safe_click($mech, { selector => "#launch_popup" });
     # $mech->sleep(0); # just in case, to get the event loop a chance to catch up
     my @tabs = $mech->list_tabs->get;
 
@@ -141,7 +141,7 @@ HTML
 
     #$mech->sleep(1);
     note "Set up target=_blank popup";
-    $mech->update_html(<<"HTML");
+    t::helper::safe_update_html($mech, <<"HTML");
     <html>
     <title>Test page with popup</title>
     <body><a href="$url" target=_blank id="launch_popup">Pop up</a>
@@ -149,7 +149,7 @@ HTML
 HTML
 
     note "Launching popup";
-    $mech->click({ selector => "#launch_popup" });
+    t::helper::safe_click($mech, { selector => "#launch_popup" });
     @tabs = $mech->list_tabs->get;
     $opened_tab_f->get();
     undef $opened_tab_f;
@@ -168,7 +168,7 @@ HTML
     cmp_ok 0+@tabs_after, '<', 0+@tabs, "We autoclosed the newfound tab";
 
     $mech->unsubscribe( 'popup' );
-    $mech->click({ selector => "#launch_popup" });
+    t::helper::safe_click($mech, { selector => "#launch_popup" });
     $mech->sleep(0.1);
 
     is 0+@opened, 0, "We can disable our on_popup callback";
@@ -176,11 +176,7 @@ HTML
     note "Cleaning up instance $file";
 });
 
-if( $^O =~ /mswin/i ) {
-    alarm(0);
-} else {
-    ualarm(0); # disable watchdog
-}
+alarm(0);
 
 #if( ! $target_tab->{targetId}) {
 #    die "This Chrome doesn't want more than one debugger connection";

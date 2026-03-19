@@ -37,18 +37,20 @@ my $server = Test::HTTP::LocalServer->spawn(
 t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
     my ($browser_instance, $mech) = @_;
 
+    t::helper::set_watchdog(60);
+
     isa_ok $mech, 'WWW::Mechanize::Chrome';
 
     my ($site,$estatus) = ($server->url,200);
 
-    my $res = $mech->get($site);
+    my $res = t::helper::safe_get($mech, $site);
     isa_ok $res, 'HTTP::Response', "Response";
 
     is $mech->uri, $site, "Navigated to $site";
 
     my $link = "https://google.com/maps/search/Furniture+at+Praha/@50.1064625,14.3744223,14z/";
 
-    t::helper::safe_get($mech, $link, timeout => 10);
+    t::helper::safe_get($mech, $link, timeout => 30);
     # The error with HTTP::Message must be occurred on the next step
 
 # It seems we have some delayed loading that messes up the DOM here :-(
@@ -61,8 +63,9 @@ t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
         warn $error;
     };
 
-    my $c = $mech->content;
+    my $c = t::helper::safe_content($mech, timeout => 30);
     is $error, undef, "No warning was raised";
 });
 
 $server->stop;
+alarm(0);

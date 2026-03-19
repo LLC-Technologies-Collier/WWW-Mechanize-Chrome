@@ -36,7 +36,7 @@ t::helper::run_across_instances(\@instances, \&new_mech, 17, sub {
 
     isa_ok $mech, 'WWW::Mechanize::Chrome';
 
-    my $res = $mech->get_local('50-click.html');
+    my $res = t::helper::safe_get_local($mech, '50-click.html');
     ok $res->is_success, "We retrieved 50-click.html";
 
     note "Calling forms() in scalar context";
@@ -55,7 +55,7 @@ t::helper::run_across_instances(\@instances, \&new_mech, 17, sub {
     is $f[0]->get_attribute('id'), 'foo', "We found the one form";
 
     note "Calling forms() on a page with multiple forms";
-    $mech->get_local('50-form2.html');
+    t::helper::safe_get_local($mech, '50-form2.html');
     ok $mech->success, "We retrieved 50-form2.html";
 
     $f = $mech->forms;
@@ -73,7 +73,7 @@ t::helper::run_across_instances(\@instances, \&new_mech, 17, sub {
     is $f->[6]->get_attribute('id'), 'samename', "We found the seventh form";
 
     note "Navigating to empty page";
-    $mech->get_local('51-empty-page.html');
+    t::helper::safe_get_local($mech, '51-empty-page.html');
     note "Calling forms() on empty page";
     @f = $mech->forms;
 
@@ -87,8 +87,4 @@ t::helper::run_across_instances(\@instances, \&new_mech, 17, sub {
     note "End of test sub for $browser_instance";
 });
 
-if( $^O =~ /mswin/i ) {
-    alarm(0);
-} else {
-    alarm(0);
-}
+alarm(0);

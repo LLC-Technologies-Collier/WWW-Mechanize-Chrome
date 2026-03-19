@@ -40,16 +40,16 @@ t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
 
     t::helper::set_watchdog(60);
 
-    $mech->get_local('50-form2.html');
+    t::helper::safe_get_local($mech, '50-form2.html');
     ok $mech->current_form, "At start, we have a current form";
-    $mech->form_number(2);
-    my $button = $mech->selector('#btn_ok', single => 1);
+    t::helper::safe_form_number($mech, 2);
+    my $button = t::helper::safe_selector($mech, '#btn_ok', single => 1);
     isa_ok $button, 'WWW::Mechanize::Chrome::Node', "The button image";
-    ok $mech->submit, 'Sent the page';
+    ok t::helper::safe_submit($mech), 'Sent the page';
     ok $mech->current_form, "After a submit, we have a current form";
 
-    $mech->get_local('50-form2.html');
-    $mech->form_id('snd2');
+    t::helper::safe_get_local($mech, '50-form2.html');
+    t::helper::safe_form_id($mech, 'snd2');
     ok $mech->current_form, "After setting form_id, We have a current form";
     $mech->sleep(0.1); # why is this here?!
     is $mech->current_form->get_attribute('id'), 'snd2', "We can ask the form with get_attribute(id)";
@@ -80,34 +80,34 @@ t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
         single => 1)->get_attribute('value', live => 1), 99,
         "We have set field 'id' to '99' in the correct form";
 
-    $mech->get_local('50-form2.html');
+    t::helper::safe_get_local($mech, '50-form2.html');
     note "Selecting form by fields 'r1','r2'";
-    $mech->form_with_fields('r1','r2');
+    t::helper::safe_form_with_fields($mech, 'r1','r2');
     ok $mech->current_form, "We can find a form by its contained input fields";
 
-    $mech->get_local('50-form2.html');
+    t::helper::safe_get_local($mech, '50-form2.html');
     note "Selecting form by name 'snd'";
-    $mech->form_name('snd');
+    t::helper::safe_form_name($mech, 'snd');
     ok $mech->current_form, "We can find a form by its name";
     is $mech->current_form->get_attribute('name'), 'snd', "We can find a form by its name";
 
-    $mech->get_local('50-form2.html');
+    t::helper::safe_get_local($mech, '50-form2.html');
     ok $mech->current_form, "On a new ->get, we have a current form";
 
-    $mech->get_local('50-form2.html');
+    t::helper::safe_get_local($mech, '50-form2.html');
     note "Selecting form by field 'comment'";
-    $mech->form_with_fields('comment');
+    t::helper::safe_form_with_fields($mech, 'comment');
     ok $mech->current_form, "We can find a form by its contained textarea fields";
-    $mech->field('comment', "Just another Phrome Hacker,");
+    t::helper::safe_field($mech, 'comment', "Just another Phrome Hacker,");
     pass "We survived setting the field 'comment' to some JAPH";
     like t::helper::safe_xpath($mech, './/textarea',
         node   => $mech->current_form,
         single => 1)->get_attribute('value'), qr/Just another/,
         "We set textarea and verified it";
 
-    $mech->get_local('50-form2.html');
+    t::helper::safe_get_local($mech, '50-form2.html');
     note "Selecting form by field 'quickcomment'";
-    $mech->form_with_fields('quickcomment');
+    t::helper::safe_form_with_fields($mech, 'quickcomment');
     ok $mech->current_form, "We can find a form by its contained select fields";
     
     note "Setting field 'quickcomment' to 2";
@@ -120,9 +120,9 @@ t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
     cmp_bag \@result, [2], "->field returned bag 2";
     # diag explain \@result;
 
-    $mech->get_local('50-form2.html');
+    t::helper::safe_get_local($mech, '50-form2.html');
     note "Selecting form by field 'multic'";
-    $mech->form_with_fields('multic');
+    t::helper::safe_form_with_fields($mech, 'multic');
     ok $mech->current_form, "We can find a form by its contained multi-select fields";
     
     $mech->sleep(1) if $^O =~ /mswin/i;
@@ -141,9 +141,9 @@ t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
     cmp_bag \@result, [1,1,2,2], "->field returned bag 1,1,2,2";
     # diag explain \@result;
 
-    $mech->get_local('50-form2.html');
+    t::helper::safe_get_local($mech, '50-form2.html');
     note "Selecting form by field 'date'";
-    $mech->form_with_fields('date');
+    t::helper::safe_form_with_fields($mech, 'date');
     @result = ();
     my $ok = eval {
         t::helper::safe_set_fields($mech, date => ['2020-04-04',2] );
@@ -158,8 +158,4 @@ t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
     note "End of test sub for $browser_instance";
 });
 
-if( $^O =~ /mswin/i ) {
-    alarm(0);
-} else {
-    ualarm(0);
-}
+alarm(0);
