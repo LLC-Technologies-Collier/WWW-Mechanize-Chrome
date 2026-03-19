@@ -41,74 +41,81 @@ t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
     t::helper::set_watchdog($t::helper::is_slow ? 180 : 60);
 
     t::helper::safe_get_local($mech, '50-form2.html');
-    ok $mech->current_form, "At start, we have a current form";
+    ok t::helper::safe_current_form($mech), "At start, we have a current form";
     t::helper::safe_form_number($mech, 2);
     my $button = t::helper::safe_selector($mech, '#btn_ok', single => 1);
     isa_ok $button, 'WWW::Mechanize::Chrome::Node', "The button image";
     ok t::helper::safe_submit($mech), 'Sent the page';
-    ok $mech->current_form, "After a submit, we have a current form";
+    ok t::helper::safe_current_form($mech), "After a submit, we have a current form";
 
     t::helper::safe_get_local($mech, '50-form2.html');
     t::helper::safe_form_id($mech, 'snd2');
-    ok $mech->current_form, "After setting form_id, We have a current form";
+    ok t::helper::safe_current_form($mech), "After setting form_id, We have a current form";
     $mech->sleep(0.1); # why is this here?!
-    is $mech->current_form->get_attribute('id'), 'snd2', "We can ask the form with get_attribute(id)";
-    my $content = $mech->current_form->get_attribute('innerHTML');
+    is t::helper::safe_get_attribute($mech, t::helper::safe_current_form($mech), 'id'), 'snd2', "We can ask the form with get_attribute(id)";
+    my $content = t::helper::safe_get_attribute($mech, t::helper::safe_current_form($mech), 'innerHTML');
     ok !!$content, "We got content from asking the current form with get_attribute";
-    my $backendNodeId = $mech->current_form->backendNodeId;
+    my $backendNodeId = t::helper::safe_current_form($mech)->backendNodeId;
     ok !!$backendNodeId, "The form has a backendNodeId '$backendNodeId'";
     t::helper::safe_field($mech, 'id', 99);
     pass "We survived setting the field 'id' to 99";
-    my $current_form = $mech->current_form;
-    ok !!$current_form, "We got a current form";
-    my $objectId = $current_form->objectId;
+    my $current_form = t::helper::safe_current_form($mech);
+    my $objectId = t::helper::safe_objectId($mech, $current_form);
     ok !!$objectId, "The form has an objectId ('$objectId')";
     #like $objectId, qr{injectedScriptId}, "The objectId matches /injectedScriptId/";
-    $objectId = $current_form->objectId;
+    $objectId = t::helper::safe_objectId($mech, $current_form);
     is $@, '', "No error when retrieving objectId twice";
     ok !!$objectId, "The form still has an objectId ('$objectId')";
     #like $objectId, qr{injectedScriptId}, "The objectId still matches /injectedScriptId/";
+
     my $content2;
-    #eval {
-        $content2 = $current_form->get_attribute('innerHTML');
-    #};
+    eval {
+        $content2 = t::helper::safe_get_attribute($mech, $current_form, 'innerHTML');
+    };
+
     is $@, '', "No error when retrieving form HTML";
     ok !!$content2, "We got content from (again) asking the current form with get_attribute";
-    isnt $content2, $content, "we managed to change the form by setting the 'id' field";
-    is t::helper::safe_xpath($mech, './/*[@name="id"]',
-        node => $mech->current_form,
-        single => 1)->get_attribute('value', live => 1), 99,
+    is t::helper::safe_get_attribute($mech, t::helper::safe_xpath($mech, './/*[@name="id"]',
+        node => t::helper::safe_current_form($mech),
+        single => 1), 'value', live => 1), 99,
+        "we managed to change the form by setting the 'id' field";
+    is t::helper::safe_get_attribute($mech, t::helper::safe_xpath($mech, './/*[@name="id"]',
+        node => t::helper::safe_current_form($mech),
+        single => 1), 'value', live => 1), 99,
         "We have set field 'id' to '99' in the correct form";
+
+    t::helper::safe_get_local($mech, '50-form2.html');
+    ok t::helper::safe_current_form($mech), "On a new ->get, we have a current form";
 
     t::helper::safe_get_local($mech, '50-form2.html');
     note "Selecting form by fields 'r1','r2'";
     t::helper::safe_form_with_fields($mech, 'r1','r2');
-    ok $mech->current_form, "We can find a form by its contained input fields";
+    ok t::helper::safe_current_form($mech), "We can find a form by its contained input fields";
 
     t::helper::safe_get_local($mech, '50-form2.html');
     note "Selecting form by name 'snd'";
     t::helper::safe_form_name($mech, 'snd');
-    ok $mech->current_form, "We can find a form by its name";
-    is $mech->current_form->get_attribute('name'), 'snd', "We can find a form by its name";
+    ok t::helper::safe_current_form($mech), "We can find a form by its name";
+    is t::helper::safe_get_attribute($mech, t::helper::safe_current_form($mech), 'name'), 'snd', "We can find a form by its name";
 
     t::helper::safe_get_local($mech, '50-form2.html');
-    ok $mech->current_form, "On a new ->get, we have a current form";
+    ok t::helper::safe_current_form($mech), "On a new ->get, we have a current form";
 
     t::helper::safe_get_local($mech, '50-form2.html');
     note "Selecting form by field 'comment'";
     t::helper::safe_form_with_fields($mech, 'comment');
-    ok $mech->current_form, "We can find a form by its contained textarea fields";
+    ok t::helper::safe_current_form($mech), "We can find a form by its contained textarea fields";
     t::helper::safe_field($mech, 'comment', "Just another Phrome Hacker,");
     pass "We survived setting the field 'comment' to some JAPH";
-    like t::helper::safe_xpath($mech, './/textarea',
-        node   => $mech->current_form,
-        single => 1)->get_attribute('value'), qr/Just another/,
+    like t::helper::safe_get_attribute($mech, t::helper::safe_xpath($mech, './/textarea',
+        node   => t::helper::safe_current_form($mech),
+        single => 1), 'value'), qr/Just another/,
         "We set textarea and verified it";
 
     t::helper::safe_get_local($mech, '50-form2.html');
     note "Selecting form by field 'quickcomment'";
     t::helper::safe_form_with_fields($mech, 'quickcomment');
-    ok $mech->current_form, "We can find a form by its contained select fields";
+    ok t::helper::safe_current_form($mech), "We can find a form by its contained select fields";
     
     note "Setting field 'quickcomment' to 2";
     t::helper::safe_field($mech, 'quickcomment', 2);
@@ -123,7 +130,7 @@ t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
     t::helper::safe_get_local($mech, '50-form2.html');
     note "Selecting form by field 'multic'";
     t::helper::safe_form_with_fields($mech, 'multic');
-    ok $mech->current_form, "We can find a form by its contained multi-select fields";
+    ok t::helper::safe_current_form($mech), "We can find a form by its contained multi-select fields";
     
     $mech->sleep(1) if $^O =~ /mswin/i;
     note "Getting initial value of 'multic'";
