@@ -5703,37 +5703,32 @@ sub set_field_future($self, %options ) {
         or croak "Need a field to set";
 
     weaken(my $s = $self);
-    return Future->wait_all(
-        $obj->get_tag_name_future(),
-        $obj->get_attribute_future('type', live => 1),
-        $obj->objectId_future(),
-    )->then(sub {
-        my ($tag_f, $type_f, $id_f) = @_;
-        my $tag = $tag_f->get;
-        my $type = $type_f->get || '';
-        my $id = $id_f->get;
+    return $obj->get_tag_name_future()->then(sub($tag) {
+        return $obj->get_attribute_future('type', live => 1)->then(sub($type) {
+            return $obj->objectId_future()->then(sub($id) {
+                $type //= '';
 
-        my %method = (
-            input    => 'value',
-            textarea => 'content',
-            select   => 'selected',
-        );
-        my $method = $method{ lc $tag };
-        if( lc $tag eq 'input' and $type eq 'radio' ) {
-            $method = 'checked';
-        };
+                my %method = (
+                    input    => 'value',
+                    textarea => 'content',
+                    select   => 'selected',
+                );
+                my $method = $method{ lc $tag };
+                if( lc $tag eq 'input' and $type eq 'radio' ) {
+                    $method = 'checked';
+                };
 
-        if( ! $id ) {
-            warn "No object id for nodeId " . $obj->nodeId;
-        };
+                if( ! $id ) {
+                    warn "No object id for nodeId " . $obj->nodeId;
+                };
 
-        # Send pre-change events:
-        my @pre_f;
-        for my $ev (@$pre) {
-            push @pre_f, $s->target->send_message(
-                    'Runtime.callFunctionOn',
-                    objectId => $id,
-                    functionDeclaration => <<'JS',
+                # Send pre-change events:
+                my @pre_f;
+                for my $ev (@$pre) {
+                    push @pre_f, $s->target->send_message(
+                            'Runtime.callFunctionOn',
+                            objectId => $id,
+                            functionDeclaration => <<'JS',
 function(ev) {
     var event = new Event(ev, {
         view : window,
@@ -5743,23 +5738,23 @@ function(ev) {
     this.dispatchEvent(event);
 }
 JS
-                    arguments => [{ value => $ev }],
-                );
-        };
+                            arguments => [{ value => $ev }],
+                        );
+                };
 
-        return Future->wait_all( @pre_f )->then(sub {
-            if( 'value' eq $method ) {
-                return $s->target->send_message('DOM.setAttributeValue', nodeId => 0+$obj->nodeId, name => 'value', value => "$value" );
+                return Future->wait_all( @pre_f )->then(sub {
+                    if( 'value' eq $method ) {
+                        return $s->target->send_message('DOM.setAttributeValue', nodeId => 0+$obj->nodeId, name => 'value', value => "$value" );
 
-            } elsif( 'selected' eq $method ) {
-            # ignoring undef; but [] would reset to no option
-            if (defined $value) {
+                    } elsif( 'selected' eq $method ) {
+                        # ignoring undef; but [] would reset to no option
+                        if (defined $value) {
 
-                $value = [ $value ] unless ref $value;
-                return $self->target->send_message(
-                    'Runtime.callFunctionOn',
-                    objectId => $id,
-                    functionDeclaration => <<'JS',
+                            $value = [ $value ] unless ref $value;
+                            return $s->target->send_message(
+                                'Runtime.callFunctionOn',
+                                objectId => $id,
+                                functionDeclaration => <<'JS',
 function(newValue) {
   var i, j;
   if (this.multiple == true) {
@@ -5776,32 +5771,32 @@ function(newValue) {
   }
 }
 JS
-                    arguments => [{ value => $value }],
-                );
-            }
-        } elsif( 'checked' eq $method ) {
-            if (defined $value) {
-                $value = [ $value ] unless ref $value;
-                return $obj->set_attribute_future('checked' => JSON::true);
-            }
-        } elsif( 'content' eq $method ) {
-            return $self->target->send_message('Runtime.callFunctionOn',
-                objectId => $id,
-                functionDeclaration => 'function(newValue) { this.innerHTML = newValue }',
-                arguments => [{ value => $value }]
-            );
-        } else {
-            die "Don't know how to set the value for node '$tag', sorry";
-        };
-        return Future->done();
-    })->then(sub {
-        # Send post-change events:
-        my @post_f;
-        for my $ev (@$post) {
-            push @post_f, $self->target->send_message(
-                    'Runtime.callFunctionOn',
-                    objectId => $id,
-                    functionDeclaration => <<'JS',
+                                arguments => [{ value => $value }],
+                            );
+                        }
+                    } elsif( 'checked' eq $method ) {
+                        if (defined $value) {
+                            $value = [ $value ] unless ref $value;
+                            return $obj->set_attribute_future('checked' => JSON::true);
+                        }
+                    } elsif( 'content' eq $method ) {
+                        return $s->target->send_message('Runtime.callFunctionOn',
+                            objectId => $id,
+                            functionDeclaration => 'function(newValue) { this.innerHTML = newValue }',
+                            arguments => [{ value => $value }]
+                        );
+                    } else {
+                        die "Don't know how to set the value for node '$tag', sorry";
+                    }
+                    return Future->done();
+                })->then(sub {
+                    # Send post-change events:
+                    my @post_f;
+                    for my $ev (@$post) {
+                        push @post_f, $s->target->send_message(
+                                'Runtime.callFunctionOn',
+                                objectId => $id,
+                                functionDeclaration => <<'JS',
 function(ev) {
     var event = new Event(ev, {
         view : window,
@@ -5811,11 +5806,13 @@ function(ev) {
     this.dispatchEvent(event);
 }
 JS
-                    arguments => [{ value => $ev }],
-                );
-        };
-        return Future->wait_all( @post_f );
-    });
+                                arguments => [{ value => $ev }],
+                            );
+                    };
+                    return Future->wait_all( @post_f );
+                });
+            });
+        });
     });
 }
 
