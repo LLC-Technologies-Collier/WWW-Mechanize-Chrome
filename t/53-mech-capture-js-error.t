@@ -49,7 +49,7 @@ sub load_file_ok {
 t::helper::run_across_instances(\@instances, \&new_mech, 25, sub {
 
     my ($browser_instance, $mech) = @_;
-    t::helper::set_watchdog(30);
+    t::helper::set_watchdog($t::helper::is_slow ? 90 : 30);
     isa_ok $mech, 'WWW::Mechanize::Chrome';
     can_ok $mech, 'js_errors','clear_js_errors';
 

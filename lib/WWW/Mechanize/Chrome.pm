@@ -3682,11 +3682,26 @@ This method is specific to WWW::Mechanize::Chrome.
 
 sub base {
     my ($self) = @_;
-    (my $base) = $self->selector('base');
-    $base = $base->get_attribute('href', live => 1)
-        if $base && defined ($base->{nodeId});
-    $base ||= $self->uri;
-};
+    return $self->base_future->get;
+}
+
+sub base_future {
+    my ($self) = @_;
+    weaken(my $s = $self);
+    return $self->selector_future('base', maybe => 1)->then(sub {
+        my ($base_node) = @_;
+        if ($base_node && defined($base_node->{nodeId})) {
+            return $base_node->get_attribute_future('href', live => 1);
+        }
+        return Future->done(undef);
+    })->then(sub {
+        my ($base) = @_;
+        if ($base) {
+            return Future->done($base);
+        }
+        return $s->uri_future;
+    });
+}
 
 =head2 C<< $mech->content_type() >>
 
@@ -3804,47 +3819,63 @@ our %link_spec = (
 );
 # taken from WWW::Mechanize. This should possibly just be reused there
 sub make_link {
-    my ($self,$node,$base) = @_;
+    my ($self, $node, $base) = @_;
+    return $self->make_link_future($node, $base)->get;
+}
+
+sub make_link_future {
+    my ($self, $node, $base) = @_;
+    weaken(my $s = $self);
 
     my $tag = lc $node->get_tag_name;
-    my $url;
+    my $url_f;
     if ($tag) {
-        if( ! exists $link_spec{ $tag }) {
+        if (! exists $link_spec{ $tag }) {
             carp "Unknown link-spec tag '$tag'";
-            $url= '';
+            $url_f = Future->done('');
         } else {
-            $url = $node->get_attribute( $link_spec{ $tag }->{url}, live => 1 );
+            $url_f = $node->get_attribute_future( $link_spec{ $tag }->{url}, live => 1 );
         };
-    };
-
-    if ($tag eq 'meta') {
-        my $content = $url;
-        if ( $content =~ /^\d+\s*;\s*url\s*=\s*(\S+)/i ) {
-            $url = $1;
-            $url =~ s/^"(.+)"$/$1/ or $url =~ s/^'(.+)'$/$1/;
-        }
-        else {
-            undef $url;
-        }
-    };
-
-    if (defined $url) {
-        #my $text  => $node->get_attribute('text'),
-        my $text = $node->get_text;
-        $text =~ s!\A\s+!!s;
-        $text =~ s!\s+\z!!s;
-        my $res = WWW::Mechanize::Link->new({
-            tag   => $tag,
-            name  => $node->get_attribute('name', live => 1),
-            base  => $base,
-            url   => $url,
-            text  => $text,
-            attrs => {},
-        });
-        return $res
     } else {
-        ()
+        $url_f = Future->done(undef);
     };
+
+    return $url_f->then(sub {
+        my ($url) = @_;
+        if ($tag eq 'meta' && defined $url) {
+            if ( $url =~ /^\d+\s*;\s*url\s*=\s*(\S+)/i ) {
+                $url = $1;
+                $url =~ s/^"(.+)"$/$1/ or $url =~ s/^'(.+)'$/$1/;
+            } else {
+                undef $url;
+            }
+        }
+
+        if (defined $url) {
+            return Future->wait_all(
+                $node->get_text_future,
+                $node->get_attribute_future('name', live => 1)
+            )->then(sub {
+                my ($text_f, $name_f) = @_;
+                my $text = $text_f->get;
+                my $name = $name_f->get;
+
+                $text =~ s!\A\s+!!s;
+                $text =~ s!\s+\z!!s;
+
+                return Future->done(WWW::Mechanize::Link->new({
+                    tag   => $tag,
+                    name  => $name,
+                    base  => $base,
+                    url   => $url,
+                    text  => $text,
+                    attrs => {},
+                }));
+            });
+        } else {
+            return Future->done(); # Return empty list in future context
+        }
+    });
 }
 
 sub links {
@@ -3855,14 +3886,22 @@ sub links {
 };
 
 sub links_future {
-    my ($self) = @_;
+    my ($self, %options) = @_;
     weaken(my $s = $self);
-    return $self->selector_future( (join ",", sort keys %link_spec), wantarray => 1 )
-    ->then(sub(@links) {
-        my $base = $s->base;
-        return Future->done( map {
-            $s->make_link($_,$base)
-        } @links );
+
+    return $self->base_future->then(sub {
+        my ($base) = @_;
+        return $s->selector_future( (join ",", sort keys %link_spec), %options, wantarray => 1 )
+        ->then(sub {
+            my (@links) = @_;
+            return Future->wait_all(
+                map { $s->make_link_future($_, $base) } @links
+            );
+        });
+    })->then(sub {
+        my (@link_objects_f) = @_;
+        my @res = map { $_->get } @link_objects_f;
+        return Future->done( @res );
     });
 }
 
@@ -4174,12 +4213,19 @@ sub find_all_links_future {
     my $wantarray = exists $opts{ wantarray } ? delete $opts{ wantarray } : wantarray;
     $opts{ n } = 'all';
     weaken(my $s = $self);
-    return $self->find_all_links_dom_future( %opts, wantarray => 1 )
-    ->then(sub(@matches) {
-        my $base = $s->base;
-        my @res = map {
-            $s->make_link($_, $base);
-        } @matches;
+
+    return $self->base_future->then(sub {
+        my ($base) = @_;
+        return $s->find_all_links_dom_future( %opts, wantarray => 1 )
+        ->then(sub {
+            my (@matches) = @_;
+            return Future->wait_all(
+                map { $s->make_link_future($_, $base) } @matches
+            );
+        });
+    })->then(sub {
+        my (@link_objects_f) = @_;
+        my @res = map { $_->get } @link_objects_f;
         return Future->done( $wantarray ? @res : \@res );
     });
 }

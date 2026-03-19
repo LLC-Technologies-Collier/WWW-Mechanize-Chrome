@@ -43,7 +43,7 @@ sub new_mech {
 t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
     my( $file, $mech ) = splice @_; # so we move references
     
-    t::helper::set_watchdog(30);
+    t::helper::set_watchdog($t::helper::is_slow ? 90 : 30);
 
     if( $ENV{WWW_MECHANIZE_CHROME_TRANSPORT}
         and $ENV{WWW_MECHANIZE_CHROME_TRANSPORT} eq 'Chrome::DevToolsProtocol::Transport::Mojo'

@@ -10,7 +10,7 @@ t::helper - Internal test helper for WWW::Mechanize::Chrome
     use t::helper;
 
     # Set a 30-second watchdog
-    t::helper::set_watchdog(30);
+    t::helper::set_watchdog($t::helper::is_slow ? 90 : 30);
 
     # Get available Chrome instances
     my @instances = t::helper::browser_instances();

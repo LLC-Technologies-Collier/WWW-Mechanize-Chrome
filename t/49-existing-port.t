@@ -77,7 +77,7 @@ sub new_mech {
 t::helper::run_across_instances(\@instances, \&new_mech, $test_count, sub {
     my ($browser_instance, $mech) = @_;
 
-    t::helper::set_watchdog(60);
+    t::helper::set_watchdog($t::helper::is_slow ? 180 : 60);
 
     pass "We can connect to port $instance_port";
     is $browser_launched, 1, q{We didn't spawn a second process};

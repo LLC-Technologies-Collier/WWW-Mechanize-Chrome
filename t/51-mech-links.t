@@ -47,7 +47,7 @@ t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
     my ($browser_instance, $mech) = @_;
     isa_ok $mech, 'WWW::Mechanize::Chrome';
 
-    t::helper::set_watchdog(60);
+    t::helper::set_watchdog($t::helper::is_slow ? 180 : 60);
 
     t::helper::safe_get_local($mech, '51-mech-links-nobase.html');
     $mech->sleep(0.5); # Wait for DOM to stabilize (iframes loading)

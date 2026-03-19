@@ -37,7 +37,7 @@ my $imported;
 t::helper::run_across_instances(\@instances, \&new_mech, 2, sub {
     my( $file, $mymech ) = splice @_; # so we move references
 
-    t::helper::set_watchdog(60);
+    t::helper::set_watchdog($t::helper::is_slow ? 180 : 60);
 
     $mech = $mymech;
     undef $mymech;

@@ -13,7 +13,7 @@ Log::Log4perl->easy_init($ERROR);  # Set priority of root logger to ERROR
 #Log::Log4perl->easy_init($TRACE)
 #    if $^O =~ /darwin/i;
 
-t::helper::set_watchdog(45);
+t::helper::set_watchdog($t::helper::is_slow ? 120 : 45);
 
 # What instances of Chrome will we try?
 my @instances = t::helper::browser_instances();

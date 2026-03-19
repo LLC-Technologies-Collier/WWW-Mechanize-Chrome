@@ -50,7 +50,7 @@ sub load_file_ok {
 t::helper::run_across_instances(\@instances, \&new_mech, 14, sub {
     my ($firefox_instance, $mech) = @_;
 
-    t::helper::set_watchdog(30);
+    t::helper::set_watchdog($t::helper::is_slow ? 90 : 30);
     isa_ok $mech, 'WWW::Mechanize::Chrome';
 
     load_file_ok($mech, '49-mech-get-file.html', javascript => 0);

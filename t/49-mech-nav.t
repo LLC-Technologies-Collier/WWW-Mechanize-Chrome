@@ -38,7 +38,7 @@ my $server = t::helper->safe_server(
 
 t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
     my( $file, $mech ) = splice @_; # so we move references
-    t::helper::set_watchdog(60);
+    t::helper::set_watchdog($t::helper::is_slow ? 180 : 60);
 
     t::helper::safe_get($mech, $server->url);
 

@@ -47,7 +47,7 @@ my @test_urls = ($server->url, WWW::Mechanize::Chrome->_local_url( '52-iframeset
 t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
     my ($browser_instance, $mech) = @_;
 
-    t::helper::set_watchdog(60);
+    t::helper::set_watchdog($t::helper::is_slow ? 180 : 60);
 
     my $version = $mech->chrome_version;
 
