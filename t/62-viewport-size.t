@@ -49,7 +49,7 @@ sub get_viewport_size {
 
 t::helper::run_across_instances(\@instances, \&new_mech, 6, sub {
     my ($browser_instance, $mech) = @_;
-    t::helper::set_watchdog(60);
+    t::helper::set_watchdog($t::helper::is_slow ? 180 : 60);
 
     my $version = $mech->chrome_version;
 

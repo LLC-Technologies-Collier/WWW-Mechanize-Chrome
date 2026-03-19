@@ -44,7 +44,7 @@ my $server = t::helper->safe_server(
 
 t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
     my ($browser_instance, $mech) = @_;
-    t::helper::set_watchdog(60);
+    t::helper::set_watchdog($t::helper::is_slow ? 180 : 60);
 
     # See https://bugs.chromium.org/p/chromium/issues/detail?id=795336
     #     https://bugs.chromium.org/p/chromium/issues/detail?id=767683

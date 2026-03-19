@@ -53,7 +53,7 @@ sub new_mech {
 t::helper::run_across_instances(\@instances, \&new_mech, 12*@files+5, sub {
     my ($browser_instance, $mech) = @_;
 
-    t::helper::set_watchdog(30);
+    t::helper::set_watchdog($t::helper::is_slow ? 90 : 30);
 
     isa_ok $mech, 'WWW::Mechanize::Chrome';
 

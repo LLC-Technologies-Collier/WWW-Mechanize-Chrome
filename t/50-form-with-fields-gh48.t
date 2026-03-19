@@ -52,7 +52,7 @@ sub new_mech {
 t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
     my ($browser_instance, $mech) = @_;
 
-    t::helper::set_watchdog(60);
+    t::helper::set_watchdog($t::helper::is_slow ? 180 : 60);
 
     t::helper::safe_get_local($mech, '50-form-with-fields-gh48.html');
     # A second attempt, to cycle the node ids quickly to avoid a node id 0

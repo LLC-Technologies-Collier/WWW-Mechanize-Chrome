@@ -34,7 +34,7 @@ sub new_mech {
 t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
     my ($browser_instance, $mech) = @_;
 
-    t::helper::set_watchdog(60);
+    t::helper::set_watchdog($t::helper::is_slow ? 180 : 60);
 
 #my $uri = URI::file->new_abs( 't/select.html' )->as_string;
 my $response = t::helper::safe_get_local($mech,  'select.html' );

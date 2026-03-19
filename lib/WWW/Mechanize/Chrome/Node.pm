@@ -499,8 +499,12 @@ Returns the text of the node and the contained child nodes.
 
 =cut
 
+sub get_text_future( $self ) {
+    return $self->get_attribute_future('innerText')
+}
+
 sub get_text( $self ) {
-    return $self->get_attribute('innerText')
+    return $self->get_text_future->get();
 }
 
 =head2 C<< ->set_text >>
