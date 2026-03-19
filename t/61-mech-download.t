@@ -62,7 +62,7 @@ sub new_mech {
     return $mech;
 };
 
-my $server = Test::HTTP::LocalServer->spawn(
+my $server = t::helper->safe_server(
     # IPv4 loopback is usually more permissive for downloads
     host => '127.0.0.1',
 );

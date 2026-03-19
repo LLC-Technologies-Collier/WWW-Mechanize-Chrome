@@ -34,7 +34,7 @@ sub new_mech {
 
 sub WWW::Mechanize::chrome_version { "62.0.0.0" }
 
-my $server = Test::HTTP::LocalServer->spawn(
+my $server = t::helper->safe_server(
     #debug => 1,
 );
 
