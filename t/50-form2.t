@@ -111,12 +111,12 @@ t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
     ok $mech->current_form, "We can find a form by its contained select fields";
     
     note "Setting field 'quickcomment' to 2";
-    t::helper::safe_field($mech, 'quickcomment', 2, { timeout => 15 });
+    t::helper::safe_field($mech, 'quickcomment', 2);
     pass "We survived setting the field 'quickcomment' to 2";
     
     $mech->sleep(1) if $^O =~ /mswin/i;
     note "Getting value of 'quickcomment'";
-    my @result = t::helper::safe_value($mech, 'quickcomment', { timeout => 15 });
+    my @result = t::helper::safe_value($mech, 'quickcomment');
     cmp_bag \@result, [2], "->field returned bag 2";
     # diag explain \@result;
 
@@ -127,17 +127,17 @@ t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
     
     $mech->sleep(1) if $^O =~ /mswin/i;
     note "Getting initial value of 'multic'";
-    @result = t::helper::safe_value($mech, 'multic', { all => 1, timeout => 15 });
+    @result = t::helper::safe_value($mech, 'multic', { all => 1 });
     cmp_bag \@result, [2,2,3], "->field returned bag 2,2,3";
     # diag explain \@result;
 
     note "Setting multic to 1,2";
-    t::helper::safe_field($mech, 'multic', [1,2], { timeout => 15 });
+    t::helper::safe_field($mech, 'multic', [1,2]);
     pass "We survived setting the field 'multic' to 1,2";
     
     $mech->sleep(1) if $^O =~ /mswin/i;
     note "Verifying set value of 'multic'";
-    @result = t::helper::safe_value($mech, 'multic', { all => 1, timeout => 15 });
+    @result = t::helper::safe_value($mech, 'multic', { all => 1 });
     cmp_bag \@result, [1,1,2,2], "->field returned bag 1,1,2,2";
     # diag explain \@result;
 
@@ -152,7 +152,7 @@ t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
     is $ok, 1, "We survived setting the second date field"
         or diag $@;
     $mech->sleep(1) if $^O =~ /mswin/i;
-    @result = t::helper::safe_value($mech, 'date', 2, { timeout => 15 });
+    @result = t::helper::safe_value($mech, 'date', 2);
     is_deeply \@result, ['2020-04-04'], "We set the second date field";
 
     note "End of test sub for $browser_instance";

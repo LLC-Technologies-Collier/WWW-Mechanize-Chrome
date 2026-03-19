@@ -79,7 +79,7 @@ t::helper::run_across_instances(\@instances, \&new_mech, 12*@files+5, sub {
         $mech->allow('javascript' => 1);
         ok t::helper::safe_is_visible($mech, selector => '#before'), "The element is visible";
         my $finished = eval {
-            t::helper::safe_wait_until_invisible($mech, selector => '#before', timeout => 1);
+            t::helper::safe_wait_until_invisible($mech, selector => '#before', timeout => ($t::helper::is_slow ? 10 : 1));
             1;
         };
         is $finished, undef, "We got an exception";
@@ -108,7 +108,10 @@ t::helper::run_across_instances(\@instances, \&new_mech, 12*@files+5, sub {
         ok !t::helper::safe_is_visible($mech, selector => '.status', any => 1), "We can't see .status even though there exist multiple such elements";
         t::helper::safe_click($mech, { selector => '#start', synchronize => 0 });
 
-        t::helper::safe_wait_until_visible($mech, selector => '#standby', timeout => 2, max_wait => 2);
+        t::helper::safe_wait_until_visible($mech, selector => '#standby',
+            timeout => ($t::helper::is_slow ? 10 : 2),
+            max_wait => ($t::helper::is_slow ? 10 : 2)
+        );
 
         ok t::helper::safe_is_visible($mech, selector => '#standby'), "We can see #standby";
         my $ok = eval {
@@ -145,7 +148,10 @@ t::helper::run_across_instances(\@instances, \&new_mech, 12*@files+5, sub {
         t::helper::safe_click($mech, { selector => '#start', synchronize => 0 });
 
         # Busy-wait
-        t::helper::safe_wait_until_visible($mech, xpath => '//*[contains(text(),"stand by")]', timeout => 2, max_wait => 2);
+        t::helper::safe_wait_until_visible($mech, xpath => '//*[contains(text(),"stand by")]',
+            timeout => ($t::helper::is_slow ? 10 : 2),
+            max_wait => ($t::helper::is_slow ? 10 : 2)
+        );
 
         if(! ok t::helper::safe_is_visible($mech, xpath => '//*[contains(text(),"stand by")]'), "We can see the standby message (via its text)") {
             my $standby = t::helper::safe_by_id($mech, 'standby', single=>1);
