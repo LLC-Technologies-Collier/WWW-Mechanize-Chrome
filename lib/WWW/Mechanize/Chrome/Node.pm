@@ -485,6 +485,10 @@ Fetches the tag name of this node
 
 =cut
 
+sub get_tag_name_future( $self ) {
+    return Future->done( $self->get_tag_name );
+}
+
 sub get_tag_name( $self ) {
     my $tag = $self->nodeName // "";
     $tag =~ s!\..*!!; # strip away the eventual classname

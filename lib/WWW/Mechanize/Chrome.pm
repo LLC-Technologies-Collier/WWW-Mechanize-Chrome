@@ -5679,30 +5679,39 @@ sub set_field_future($self, %options ) {
     $post ||= ['change']; # just to eliminate some checks downwards
     my $obj = delete $options{ field }
         or croak "Need a field to set";
-    my $tag = $obj->get_tag_name();
 
-    my %method = (
-        input    => 'value',
-        textarea => 'content',
-        select   => 'selected',
-    );
-    my $method = $method{ lc $tag };
-    if( lc $tag eq 'input' and $obj->get_attribute('type', live => 1) eq 'radio' ) {
-        $method = 'checked';
-    };
+    weaken(my $s = $self);
+    return Future->wait_all(
+        $obj->get_tag_name_future(),
+        $obj->get_attribute_future('type', live => 1),
+        $obj->objectId_future(),
+    )->then(sub {
+        my ($tag_f, $type_f, $id_f) = @_;
+        my $tag = $tag_f->get;
+        my $type = $type_f->get || '';
+        my $id = $id_f->get;
 
-    my $id = $obj->objectId;
-    if( ! $id ) {
-        warn "No object id for nodeId " . $obj->nodeId;
-    };
+        my %method = (
+            input    => 'value',
+            textarea => 'content',
+            select   => 'selected',
+        );
+        my $method = $method{ lc $tag };
+        if( lc $tag eq 'input' and $type eq 'radio' ) {
+            $method = 'checked';
+        };
 
-    # Send pre-change events:
-    my @pre_f;
-    for my $ev (@$pre) {
-        push @pre_f, $self->target->send_message(
-                'Runtime.callFunctionOn',
-                objectId => $id,
-                functionDeclaration => <<'JS',
+        if( ! $id ) {
+            warn "No object id for nodeId " . $obj->nodeId;
+        };
+
+        # Send pre-change events:
+        my @pre_f;
+        for my $ev (@$pre) {
+            push @pre_f, $s->target->send_message(
+                    'Runtime.callFunctionOn',
+                    objectId => $id,
+                    functionDeclaration => <<'JS',
 function(ev) {
     var event = new Event(ev, {
         view : window,
@@ -5712,15 +5721,15 @@ function(ev) {
     this.dispatchEvent(event);
 }
 JS
-                arguments => [{ value => $ev }],
-            );
-    };
+                    arguments => [{ value => $ev }],
+                );
+        };
 
-    return Future->wait_all( @pre_f )->then(sub {
-        if( 'value' eq $method ) {
-            return $self->target->send_message('DOM.setAttributeValue', nodeId => 0+$obj->nodeId, name => 'value', value => "$value" );
+        return Future->wait_all( @pre_f )->then(sub {
+            if( 'value' eq $method ) {
+                return $s->target->send_message('DOM.setAttributeValue', nodeId => 0+$obj->nodeId, name => 'value', value => "$value" );
 
-        } elsif( 'selected' eq $method ) {
+            } elsif( 'selected' eq $method ) {
             # ignoring undef; but [] would reset to no option
             if (defined $value) {
 
@@ -5783,7 +5792,8 @@ JS
                     arguments => [{ value => $ev }],
                 );
         };
-        Future->wait_all( @post_f );
+        return Future->wait_all( @post_f );
+    });
     });
 }
 
@@ -5851,13 +5861,20 @@ sub get_set_value_future($self,%options) {
 
             # We could save some work here for the simple case of single-select
             # dropdowns by not enumerating all options
-            my $tag = $obj->get_tag_name();
-            if ('SELECT' eq uc $tag) {
-                my $id = $obj->objectId;
+            weaken(my $s = $self);
+            return Future->wait_all(
+                $obj->get_tag_name_future(),
+                $obj->objectId_future(),
+            )->then(sub {
+                my ($tag_f, $id_f) = @_;
+                my $tag = $tag_f->get;
+                my $id = $id_f->get;
+
+                if ('SELECT' eq uc $tag) {
                     if( ! $id ) {
                         warn "No object id for nodeId " . $obj->nodeId;
                     };
-                return $self->target->send_message(
+                    return $s->target->send_message(
                         'Runtime.callFunctionOn',
                         objectId => $id,
                         functionDeclaration => <<'JS',
@@ -5879,9 +5896,10 @@ JS
                     return Future->done( @values );
                 });
             } else {
-                return Future->done( $obj->get_attribute('value', live => 1) );
+                return $obj->get_attribute_future('value', live => 1);
             };
         });
+    });
     } else {
         return Future->done();
     }
@@ -5913,64 +5931,85 @@ false and calls C<< $self>warn() >> with an error message.
 =cut
 
 sub select($self, $name, $value) {
-    my $field;
-    if( ! eval {
-        ($field) = $self->_field_by_name(
-            node => $self->current_form,
-            name => $name,
-            #%options,
-        );
-        1;
-    }) {
-        # the field was not found
-        return;
-    };
+    return $self->select_future($name, $value)->get;
+}
 
-    my @options = $self->xpath( './/option', node => $field);
-    my @by_index;
-    my @by_value;
-    my $single = $field->get_attribute('type', live => 1) eq "select-one";
-    my $deselect;
-
-    if ('HASH' eq ref $value||'') {
-        for (keys %$value) {
-            $self->warn(qq{Unknown select value parameter "$_"})
-              unless $_ eq 'n';
+sub select_future($self, $name, $value) {
+    weaken(my $s = $self);
+    return $self->_field_by_name_future(
+        node => $self->current_form,
+        name => $name,
+        #%options,
+    )->then(sub {
+        my ($field) = @_;
+        if (!$field) {
+            # the field was not found
+            return Future->done();
         }
 
-        $deselect = ref $value->{n};
-        @by_index = ref $value->{n} ? @{ $value->{n} } : $value->{n};
-    } elsif ('ARRAY' eq ref $value||'') {
-        # clear all preselected values
-        $deselect = 1;
-        @by_value = @{ $value };
-    } else {
-        @by_value = $value;
-    };
+        return $s->xpath_future( './/option', node => $field, wantarray => 1)->then(sub {
+            my (@options) = @_;
+            return $field->get_attribute_future('type', live => 1)->then(sub {
+                my ($type) = @_;
+                my $single = ($type || '') eq "select-one";
 
-    if ($deselect) {
-        for my $o (@options) {
-            $o->{selected} = 0;
-        }
-    };
+                my @by_index;
+                my @by_value;
+                my $deselect;
 
-    if ($single) {
-        # Only use the first element for single-element boxes
-        $#by_index = 0+@by_index ? 0 : -1;
-        $#by_value = 0+@by_value ? 0 : -1;
-    };
+                if ('HASH' eq ref $value||'') {
+                    for (keys %$value) {
+                        $s->warn(qq{Unknown select value parameter "$_"})
+                          unless $_ eq 'n';
+                    }
 
-    # Select the items, either by index or by value
-    for my $idx (@by_index) {
-        $options[$idx-1]->set_attribute('selected' => 1 );
-    };
+                    $deselect = ref $value->{n};
+                    @by_index = ref $value->{n} ? @{ $value->{n} } : $value->{n};
+                } elsif ('ARRAY' eq ref $value||'') {
+                    # clear all preselected values
+                    $deselect = 1;
+                    @by_value = @{ $value };
+                } else {
+                    @by_value = $value;
+                };
 
-    for my $v (@by_value) {
-        my $option = $self->xpath( sprintf( './/option[@value="%s"]', quote_xpath( $v )) , node => $field, single => 1 );
-        $option->set_attribute( 'selected' => '1' );
-    };
+                my @f;
+                if ($deselect) {
+                    for my $o (@options) {
+                        push @f, $o->set_attribute_future('selected' => undef );
+                    }
+                };
 
-    return @by_index + @by_value > 0;
+                if ($single) {
+                    # Only use the first element for single-element boxes
+                    $#by_index = 0+@by_index ? 0 : -1;
+                    $#by_value = 0+@by_value ? 0 : -1;
+                };
+
+                return Future->wait_all(@f)->then(sub {
+                    my @select_f;
+                    # Select the items, either by index or by value
+                    for my $idx (@by_index) {
+                        if ($options[$idx-1]) {
+                            push @select_f, $options[$idx-1]->set_attribute_future('selected' => 1 );
+                        }
+                    };
+
+                    for my $v (@by_value) {
+                        push @select_f, $s->xpath_future( sprintf( './/option[@value="%s"]', quote_xpath( $v )) , node => $field, single => 1 )
+                            ->then(sub {
+                                my ($option) = @_;
+                                return $option->set_attribute_future( 'selected' => '1' );
+                            });
+                    };
+
+                    return Future->wait_all(@select_f)->then(sub {
+                        return Future->done( @by_index + @by_value > 0 );
+                    });
+                });
+            });
+        });
+    });
 }
 
 =head2 C<< $mech->tick( $name, $value [, $set ] ) >>
