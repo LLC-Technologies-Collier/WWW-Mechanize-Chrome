@@ -6294,6 +6294,11 @@ L<< /$mech->xpath|xpath >> or L<< /$mech->selector|selector >> method.
 =cut
 
 sub is_visible {
+    my ($self, @args) = @_;
+    return $self->is_visible_future(@args)->get;
+}
+
+sub is_visible_future {
     my( $self, @args ) = @_;
     my %options;
     if (2 == @_) {
@@ -6302,16 +6307,21 @@ sub is_visible {
         ($self,%options) = @_;
     };
     _default_limiter( 'maybe', \%options );
+    
+    weaken(my $s = $self);
+    my $query_f;
     if (! $options{dom}) {
-        $options{dom} = $self->_option_query(%options);
+        $query_f = $self->_option_query_future(%options);
+    } else {
+        $query_f = Future->done($options{dom});
     };
-    # No element means not visible
-    return
-        unless $options{ dom };
-    #$options{ window } ||= $self->tab->{linkedBrowser}->{contentWindow};
-
-    my $id = $options{ dom }->objectId;
-    my ($val, $type) = $self->callFunctionOn(<<'JS', objectId => $id, arguments => []); #->get;
+    
+    return $query_f->then(sub($node) {
+        if (! $node) {
+            return Future->done(undef);
+        };
+        return $node->objectId_future->then(sub($id) {
+            return $s->callFunctionOn_future(<<'JS', objectId => $id, arguments => []);
     function ()
     {
         var obj = this;
@@ -6353,9 +6363,12 @@ sub is_visible {
         return false
     }
 JS
-    $type eq 'boolean'
-        or die "Don't know how to handle Javascript type '$type'";
-    return $val
+        })->then(sub($val, $type) {
+            $type eq 'boolean'
+                or die "Don't know how to handle Javascript type '$type'";
+            return Future->done($val);
+        });
+    });
 };
 
 =head2 C<< $mech->wait_until_invisible( $element ) >>
@@ -6406,7 +6419,13 @@ passing the selector.
 =cut
 
 sub wait_until_invisible {
-    my( $self, %options );
+    my ($self, @args) = @_;
+    return $self->wait_until_invisible_future(@args)->get;
+}
+
+sub wait_until_invisible_future {
+    my( $self, @args ) = @_;
+    my %options;
     if (2 == @_) {
         ($self,$options{dom}) = @_;
     } else {
@@ -6423,29 +6442,39 @@ sub wait_until_invisible {
     if ($timeout) {
         $timeout_after = time + $timeout;
     };
-    my $v;
-    my $node;
-    do {
-        $node = $options{ dom };
-        if (! $node) {
-            $node = $self->_option_query(%options);
-        };
-        return
-            unless $node;
-        $self->sleep( $sleep );
 
-        # If $node goes away due to a page reload, ->is_visible could die:
-        $v = eval { $self->is_visible($node) };
-    } while ( $v
-           and (!$timeout or time < $timeout_after ));
-    if ($v and $timeout and time >= $timeout_after) {
-        if( $wait ) {
-            return()
+    weaken(my $s = $self);
+    return repeat {
+        my $node_f;
+        if (! $options{dom}) {
+            $node_f = $s->_option_query_future(%options);
         } else {
-            croak "Timeout of $timeout seconds reached while waiting for element to become invisible";
+            $node_f = Future->done($options{dom});
         };
+        
+        $node_f->then(sub($node) {
+            if (! $node) {
+                return Future->done(1);
+            };
+            return $s->is_visible_future($node)->then(sub($v) {
+                if (! $v) {
+                    return Future->done(1);
+                };
+                if ($timeout and time >= $timeout_after) {
+                    if ($wait) {
+                        return Future->done(0); # wait returns false on timeout
+                    } else {
+                        return Future->fail("Timeout of $timeout seconds reached while waiting for element to become invisible");
+                    }
+                };
+                return $s->sleep_future($sleep)->then(sub { Future->done(undef) });
+            });
+        });
+    } while => sub($f) {
+        my $res = eval { $f->get };
+        if ($@) { return 0 }; # Stop on failure
+        return ! $res; # Continue if result is not true (element still visible)
     };
-    return 1;
 };
 
 =head2 C<< $mech->wait_until_visible( %options ) >>
@@ -6480,7 +6509,13 @@ on every poll instance. So the following query will work as expected:
 
 =cut
 
-sub wait_until_visible( $self, %options ) {
+sub wait_until_visible {
+    my ($self, %options) = @_;
+    return $self->wait_until_visible_future(%options)->get;
+}
+
+sub wait_until_visible_future {
+    my ($self, %options) = @_;
     my $sleep = delete $options{ sleep } || 0.3;
     my $timeout = delete $options{ timeout } || 0;
 
@@ -6490,19 +6525,40 @@ sub wait_until_visible( $self, %options ) {
     if ($timeout) {
         $timeout_after = time + $timeout;
     };
-    do {
-        # If $node goes away due to a page reload, ->is_visible could die:
-        my @nodes =
-            grep { eval { $self->is_visible( dom => $_ ) } }
-            $self->_option_query(%options);
-
-        if( @nodes ) {
-            return @nodes
-        };
-        $self->sleep( $sleep );
-    } while (!$timeout_after or time < $timeout_after );
-    if (time >= $timeout_after) {
-        croak "Timeout of $timeout seconds reached while waiting for element to become invisible";
+    
+    weaken(my $s = $self);
+    return repeat {
+        $s->_option_query_future(%options)->then(sub(@found) {
+            # Check visibility of found nodes
+            if (! @found) {
+                if ($timeout and time >= $timeout_after) {
+                    return Future->fail("Timeout of $timeout seconds reached while waiting for element to become visible");
+                };
+                return $s->sleep_future($sleep)->then(sub { Future->done(undef) });
+            };
+            
+            return Future->wait_all(
+                map { $s->is_visible_future(dom => $_) } @found
+            )->then(sub {
+                my @visible;
+                for (my $i=0; $i < @found; $i++) {
+                    my $v = eval { $_[$i]->get };
+                    push @visible, $found[$i] if $v;
+                };
+                
+                if (@visible) {
+                    return Future->done(@visible);
+                };
+                if ($timeout and time >= $timeout_after) {
+                    return Future->fail("Timeout of $timeout seconds reached while waiting for element to become visible");
+                };
+                return $s->sleep_future($sleep)->then(sub { Future->done(undef) });
+            });
+        });
+    } while => sub($f) {
+        my $res = eval { $f->get };
+        if ($@) { return 0 };
+        return ! $res;
     };
 };
 
