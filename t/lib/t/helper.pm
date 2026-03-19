@@ -10,7 +10,7 @@ t::helper - Internal test helper for WWW::Mechanize::Chrome
     use t::helper;
 
     # Set a 30-second watchdog
-    t::helper::set_watchdog($t::helper::is_slow ? 90 : 30);
+    t::helper::set_watchdog($t::helper::is_slow ? 180 : 30);
 
     # Get available Chrome instances
     my @instances = t::helper::browser_instances();
@@ -274,9 +274,54 @@ sub safe_xpath {
     }
 }
 
+sub safe_current_form {
+    my ($mech, %options) = @_;
+    my $timeout = delete $options{timeout} || ($is_slow ? 90 : 10);
+    my $start = Time::HiRes::time();
+    my $call_f = $mech->current_form_future(%options);
+    my $timeout_f = $mech->sleep_future($timeout)->then(sub { Future->fail("Timeout during current_form retrieval") });
+    my $f = Future->wait_any($call_f, $timeout_f);
+    my $res = $f->get;
+    my $elapsed = Time::HiRes::time() - $start;
+    if ($elapsed > 0.1) {
+        Test::More::note(sprintf('current_form() took %.3fs', $elapsed));
+    }
+    return $res;
+}
+
+sub safe_get_attribute {
+    my ($mech, $node, $attr, %options) = @_;
+    my $timeout = delete $options{timeout} || ($is_slow ? 90 : 10);
+    my $start = Time::HiRes::time();
+    my $call_f = $node->get_attribute_future($attr, %options);
+    my $timeout_f = $mech->sleep_future($timeout)->then(sub { Future->fail("Timeout during get_attribute $attr") });
+    my $f = Future->wait_any($call_f, $timeout_f);
+    my $res = $f->get;
+    my $elapsed = Time::HiRes::time() - $start;
+    if ($elapsed > 0.1) {
+        Test::More::note(sprintf('get_attribute("%s") took %.3fs', $attr, $elapsed));
+    }
+    return $res;
+}
+
+sub safe_objectId {
+    my ($mech, $node, %options) = @_;
+    my $timeout = delete $options{timeout} || ($is_slow ? 90 : 10);
+    my $start = Time::HiRes::time();
+    my $call_f = $node->objectId_future();
+    my $timeout_f = $mech->sleep_future($timeout)->then(sub { Future->fail("Timeout during objectId retrieval") });
+    my $f = Future->wait_any($call_f, $timeout_f);
+    my $res = $f->get;
+    my $elapsed = Time::HiRes::time() - $start;
+    if ($elapsed > 0.1) {
+        Test::More::note(sprintf('objectId() took %.3fs', $elapsed));
+    }
+    return $res;
+}
+
 sub safe_get {
     my ($mech, $url, %options) = @_;
-    my $timeout = delete $options{timeout} || ($is_slow ? 30 : 10);
+    my $timeout = delete $options{timeout} || ($is_slow ? 180 : 10);
     my $start = Time::HiRes::time();
     my $wantarray = wantarray;
     $options{ wantarray } = $wantarray;
@@ -303,7 +348,7 @@ sub safe_get_local {
     } else {
         %options = @args;
     }
-    my $timeout = delete $options{timeout} || ($is_slow ? 30 : 10);
+    my $timeout = delete $options{timeout} || ($is_slow ? 180 : 10);
     my $start = Time::HiRes::time();
     my $wantarray = wantarray;
     $options{ wantarray } = $wantarray;
@@ -328,7 +373,7 @@ sub safe_value {
     if (ref $args[-1] eq 'HASH') {
         %options = %{pop @args};
     }
-    my $timeout = delete $options{timeout} || ($is_slow ? 30 : 5);
+    my $timeout = delete $options{timeout} || ($is_slow ? 180 : 5);
     my $name = shift @args;
     my $index = shift @args;
 
@@ -361,7 +406,7 @@ sub safe_field {
     if (@args and ref $args[-1] eq 'HASH') {
         %options = %{pop @args};
     }
-    my $timeout = delete $options{timeout} || ($is_slow ? 30 : 5);
+    my $timeout = delete $options{timeout} || ($is_slow ? 180 : 5);
     my $index = shift @args;
 
     my $start = Time::HiRes::time();
@@ -383,7 +428,7 @@ sub safe_field {
 
 sub safe_set_fields {
     my ($mech, %fields) = @_;
-    my $timeout = ($is_slow ? 90 : 15);
+    my $timeout = ($is_slow ? 180 : 15);
     my $start = Time::HiRes::time();
     my $call_f = $mech->set_fields_future(%fields);
     my $timeout_f = $mech->sleep_future($timeout)->then(sub { Future->fail("Timeout during set_fields") });
@@ -398,7 +443,7 @@ sub safe_set_fields {
 
 sub safe_content {
     my ($mech, %options) = @_;
-    my $timeout = delete $options{timeout} || ($is_slow ? 30 : 10);
+    my $timeout = delete $options{timeout} || ($is_slow ? 180 : 10);
     my $start = Time::HiRes::time();
     my $call_f = $mech->content_future(%options);
     my $timeout_f = $mech->sleep_future($timeout)->then(sub { Future->fail("Timeout during content retrieval") });
@@ -413,7 +458,7 @@ sub safe_content {
 
 sub safe_decoded_content {
     my ($mech, %options) = @_;
-    my $timeout = delete $options{timeout} || ($is_slow ? 30 : 10);
+    my $timeout = delete $options{timeout} || ($is_slow ? 180 : 10);
     my $start = Time::HiRes::time();
     my $call_f = $mech->decoded_content_future();
     my $timeout_f = $mech->sleep_future($timeout)->then(sub { Future->fail("Timeout during decoded_content retrieval") });
@@ -428,7 +473,7 @@ sub safe_decoded_content {
 
 sub safe_text {
     my ($mech, %options) = @_;
-    my $timeout = delete $options{timeout} || ($is_slow ? 30 : 10);
+    my $timeout = delete $options{timeout} || ($is_slow ? 180 : 10);
     my $start = Time::HiRes::time();
     my $call_f = $mech->text_future(%options);
     my $timeout_f = $mech->sleep_future($timeout)->then(sub { Future->fail("Timeout during text retrieval") });
@@ -518,7 +563,7 @@ sub safe_content_as_pdf {
 
 sub safe_update_html {
     my ($mech, $html, %options) = @_;
-    my $timeout = delete $options{timeout} || ($is_slow ? 30 : 10);
+    my $timeout = delete $options{timeout} || ($is_slow ? 180 : 10);
     my $start = Time::HiRes::time();
     my $call_f = $mech->update_html_future($html);
     my $timeout_f = $mech->sleep_future($timeout)->then(sub { Future->fail("Timeout during update_html") });
@@ -533,7 +578,7 @@ sub safe_update_html {
 
 sub safe_wait_for_ready {
     my ($mech, %options) = @_;
-    my $timeout = delete $options{timeout} || ($is_slow ? 30 : 10);
+    my $timeout = delete $options{timeout} || ($is_slow ? 180 : 10);
     my $start = Time::HiRes::time();
     
     my $call_f = repeat {
@@ -569,7 +614,7 @@ sub safe_is_visible {
     } elsif( @args % 2 == 0 and @args > 0 and not ref $args[0] ) {
         %options = @args;
     }
-    my $timeout = delete $options{timeout} || ($is_slow ? 30 : 10);
+    my $timeout = delete $options{timeout} || ($is_slow ? 180 : 10);
     my $start = Time::HiRes::time();
     my $call_f = $mech->is_visible_future(@args);
     my $timeout_f = $mech->sleep_future($timeout)->then(sub { Future->fail("Timeout during is_visible") });
@@ -632,7 +677,7 @@ sub safe_follow_link {
     } elsif( @args % 2 == 0 and @args > 0 and not ref $args[0] ) {
         %options = @args;
     }
-    my $timeout = delete $options{timeout} || ($is_slow ? 30 : 10);
+    my $timeout = delete $options{timeout} || ($is_slow ? 180 : 10);
     my $start = Time::HiRes::time();
     my $call_f = $mech->follow_link_future(@args);
     my $timeout_f = $mech->sleep_future($timeout)->then(sub { Future->fail("Timeout during follow_link") });
@@ -647,7 +692,7 @@ sub safe_follow_link {
 
 sub safe_click {
     my ($mech, $name, %options) = @_;
-    my $timeout = delete $options{timeout} || ($is_slow ? 30 : 10);
+    my $timeout = delete $options{timeout} || ($is_slow ? 180 : 10);
     my $start = Time::HiRes::time();
     my $call_f = $mech->click_future($name, %options);
     my $timeout_f = $mech->sleep_future($timeout)->then(sub { Future->fail("Timeout during click") });
@@ -662,7 +707,7 @@ sub safe_click {
 
 sub safe_submit {
     my ($mech, $form, %options) = @_;
-    my $timeout = delete $options{timeout} || ($is_slow ? 90 : 15);
+    my $timeout = delete $options{timeout} || ($is_slow ? 180 : 15);
     my $start = Time::HiRes::time();
     my $call_f = $mech->submit_future($form);
     my $timeout_f = $mech->sleep_future($timeout)->then(sub { Future->fail("Timeout during submit") });
@@ -687,7 +732,7 @@ sub safe_tick {
     };
     $set //= 1;
 
-    my $timeout = delete $options{timeout} || ($is_slow ? 30 : 10);
+    my $timeout = delete $options{timeout} || ($is_slow ? 180 : 10);
     my $start = Time::HiRes::time();
     my $call_f = $mech->tick_future($name, $value, $set);
     my $timeout_f = $mech->sleep_future($timeout)->then(sub { Future->fail("Timeout during tick") });
@@ -711,7 +756,7 @@ sub safe_untick {
         ($name, $value, %options) = @args;
     };
 
-    my $timeout = delete $options{timeout} || ($is_slow ? 30 : 10);
+    my $timeout = delete $options{timeout} || ($is_slow ? 180 : 10);
     my $start = Time::HiRes::time();
     my $call_f = $mech->untick_future($name, $value);
     my $timeout_f = $mech->sleep_future($timeout)->then(sub { Future->fail("Timeout during untick") });
@@ -726,7 +771,7 @@ sub safe_untick {
 
 sub safe_selector {
     my ($mech, $query, %options) = @_;
-    my $timeout = delete $options{timeout} || ($is_slow ? 30 : 10);
+    my $timeout = delete $options{timeout} || ($is_slow ? 180 : 10);
     my $start = Time::HiRes::time();
     my $wantarray = wantarray;
     $options{ wantarray } = $wantarray;
@@ -747,7 +792,7 @@ sub safe_selector {
 
 sub safe_eval_in_page {
     my ($mech, $js, %options) = @_;
-    my $timeout = delete $options{timeout} || ($is_slow ? 30 : 10);
+    my $timeout = delete $options{timeout} || ($is_slow ? 180 : 10);
     my $start = Time::HiRes::time();
     my $wantarray = wantarray;
     $options{ wantarray } = $wantarray;
@@ -770,7 +815,7 @@ sub safe_eval_in_page {
 
 sub safe_eval {
     my ($mech, $js, %options) = @_;
-    my $timeout = delete $options{timeout} || ($is_slow ? 30 : 10);
+    my $timeout = delete $options{timeout} || ($is_slow ? 180 : 10);
     my $start = Time::HiRes::time();
     my $wantarray = wantarray;
     $options{ wantarray } = $wantarray;
@@ -793,7 +838,7 @@ sub safe_eval {
 
 sub safe_callFunctionOn {
     my ($mech, $js, %options) = @_;
-    my $timeout = delete $options{timeout} || ($is_slow ? 30 : 10);
+    my $timeout = delete $options{timeout} || ($is_slow ? 180 : 10);
     my $start = Time::HiRes::time();
     my $wantarray = wantarray;
     $options{ wantarray } = $wantarray;
@@ -814,7 +859,7 @@ sub safe_callFunctionOn {
 
 sub safe_form_name {
     my ($mech, $name, %options) = @_;
-    my $timeout = delete $options{timeout} || ($is_slow ? 30 : 10);
+    my $timeout = delete $options{timeout} || ($is_slow ? 180 : 10);
     my $start = Time::HiRes::time();
     my $call_f = $mech->form_name_future($name, %options);
     my $timeout_f = $mech->sleep_future($timeout)->then(sub { Future->fail("Timeout during form_name") });
@@ -829,7 +874,7 @@ sub safe_form_name {
 
 sub safe_form_id {
     my ($mech, $id, %options) = @_;
-    my $timeout = delete $options{timeout} || ($is_slow ? 30 : 10);
+    my $timeout = delete $options{timeout} || ($is_slow ? 180 : 10);
     my $start = Time::HiRes::time();
     my $call_f = $mech->form_id_future($id, %options);
     my $timeout_f = $mech->sleep_future($timeout)->then(sub { Future->fail("Timeout during form_id") });
@@ -844,7 +889,7 @@ sub safe_form_id {
 
 sub safe_form_number {
     my ($mech, $number, %options) = @_;
-    my $timeout = delete $options{timeout} || ($is_slow ? 30 : 10);
+    my $timeout = delete $options{timeout} || ($is_slow ? 180 : 10);
     my $start = Time::HiRes::time();
     my $call_f = $mech->form_number_future($number, %options);
     my $timeout_f = $mech->sleep_future($timeout)->then(sub { Future->fail("Timeout during form_number") });
@@ -863,7 +908,7 @@ sub safe_form_with_fields {
     if (ref $fields[0] eq 'HASH') {
         %options = %{shift @fields};
     }
-    my $timeout = delete $options{timeout} || ($is_slow ? 90 : 15);
+    my $timeout = delete $options{timeout} || ($is_slow ? 180 : 15);
     my $start = Time::HiRes::time();
     my $call_f = $mech->form_with_fields_future(@fields, %options);
     my $timeout_f = $mech->sleep_future($timeout)->then(sub { Future->fail("Timeout during form_with_fields") });
@@ -914,7 +959,7 @@ sub safe_infinite_scroll {
 
 sub safe_reload {
     my ($mech, %options) = @_;
-    my $timeout = delete $options{timeout} || ($is_slow ? 90 : 15);
+    my $timeout = delete $options{timeout} || ($is_slow ? 180 : 15);
     my $start = Time::HiRes::time();
     my $call_f = $mech->reload_future(%options);
     my $timeout_f = $mech->sleep_future($timeout)->then(sub { Future->fail("Timeout during reload") });
@@ -929,7 +974,7 @@ sub safe_reload {
 
 sub safe_back {
     my ($mech, %options) = @_;
-    my $timeout = delete $options{timeout} || ($is_slow ? 90 : 15);
+    my $timeout = delete $options{timeout} || ($is_slow ? 180 : 15);
     my $start = Time::HiRes::time();
     my $call_f = $mech->back_future(%options);
     my $timeout_f = $mech->sleep_future($timeout)->then(sub { Future->fail("Timeout during back") });
@@ -944,7 +989,7 @@ sub safe_back {
 
 sub safe_forward {
     my ($mech, %options) = @_;
-    my $timeout = delete $options{timeout} || ($is_slow ? 90 : 15);
+    my $timeout = delete $options{timeout} || ($is_slow ? 180 : 15);
     my $start = Time::HiRes::time();
     my $call_f = $mech->forward_future(%options);
     my $timeout_f = $mech->sleep_future($timeout)->then(sub { Future->fail("Timeout during forward") });
@@ -959,7 +1004,7 @@ sub safe_forward {
 
 sub safe_click_button {
     my ($mech, %options) = @_;
-    my $timeout = delete $options{timeout} || ($is_slow ? 90 : 15);
+    my $timeout = delete $options{timeout} || ($is_slow ? 180 : 15);
     my $start = Time::HiRes::time();
     my $call_f = $mech->click_button_future(%options);
     my $timeout_f = $mech->sleep_future($timeout)->then(sub { Future->fail("Timeout during click_button") });
@@ -974,7 +1019,7 @@ sub safe_click_button {
 
 sub safe_by_id {
     my ($mech, $id, %options) = @_;
-    my $timeout = delete $options{timeout} || ($is_slow ? 30 : 10);
+    my $timeout = delete $options{timeout} || ($is_slow ? 180 : 10);
     my $start = Time::HiRes::time();
     my $wantarray = wantarray;
     $options{ wantarray } = $wantarray;
@@ -995,7 +1040,7 @@ sub safe_by_id {
 
 sub safe_find_link_dom {
     my ($mech, %options) = @_;
-    my $timeout = delete $options{timeout} || ($is_slow ? 90 : 15);
+    my $timeout = delete $options{timeout} || ($is_slow ? 180 : 15);
     my $start = Time::HiRes::time();
     my $wantarray = wantarray;
     $options{ wantarray } = $wantarray;
@@ -1016,7 +1061,7 @@ sub safe_find_link_dom {
 
 sub safe_forms {
     my ($mech, %options) = @_;
-    my $timeout = delete $options{timeout} || ($is_slow ? 90 : 15);
+    my $timeout = delete $options{timeout} || ($is_slow ? 180 : 15);
     my $start = Time::HiRes::time();
     my $wantarray = wantarray;
     $options{ wantarray } = $wantarray;
@@ -1037,7 +1082,7 @@ sub safe_forms {
 
 sub safe_find_all_links {
     my ($mech, %options) = @_;
-    my $timeout = delete $options{timeout} || ($is_slow ? 90 : 15);
+    my $timeout = delete $options{timeout} || ($is_slow ? 180 : 15);
     my $start = Time::HiRes::time();
     my $wantarray = wantarray;
     $options{ wantarray } = $wantarray;
@@ -1058,7 +1103,7 @@ sub safe_find_all_links {
 
 sub safe_links {
     my ($mech, %options) = @_;
-    my $timeout = delete $options{timeout} || ($is_slow ? 90 : 15);
+    my $timeout = delete $options{timeout} || ($is_slow ? 180 : 15);
     my $start = Time::HiRes::time();
     my $wantarray = wantarray;
     $options{ wantarray } = $wantarray;

@@ -5153,20 +5153,24 @@ sub click_button_future($self,%options) {
         $user_message = "Button number '$v' out of range";
     };
 
+    weaken(my $s = $self);
     my $node_f;
     if ($node) {
         $node_f = Future->done($node);
     } else {
-        $node_f = $self->xpath_future( $xpath,
-                          node => $self->current_form,
-                          single => 1,
-                          user_message => $user_message,
-              );
+        $node_f = $self->current_form_future->then(sub($form) {
+            return $s->xpath_future( $xpath,
+                              node => $form,
+                              single => 1,
+                              user_message => $user_message,
+                  );
+        });
     }
 
     return $node_f->then(sub($node) {
         if ($node) {
-            return $self->click_future({ dom => $node, %options });
+            return $s->click_future({ dom => $node, %options });
+
         } else {
             $self->signal_condition($user_message);
             return Future->done();
@@ -5420,10 +5424,15 @@ The returned elements are the DOM C<< <form> >> elements.
 
 sub forms {
     my ($self, %options) = @_;
-    my @res = $self->selector('form', %options, wantarray => 1);
+    my @res = $self->forms_future(%options)->get;
     return wantarray ? @res
                      : \@res
 };
+
+sub forms_future {
+    my ($self, %options) = @_;
+    return $self->selector_future('form', %options, wantarray => 1);
+}
 
 =head2 C<< $mech->field( $selector, $value, [, $index, \@pre_events [,\@post_events]] ) >>
 
@@ -5463,14 +5472,17 @@ sub field_future($self,$name,$value,$index=undef,$pre=undef,$post=undef) {
         $pre   = $index;
         $index = undef;
     };
-    return $self->get_set_value_future(
-        name => $name,
-        value => $value,
-        pre => $pre,
-        post => $post,
-        index => $index,
-        node => $self->current_form,
-    );
+    weaken(my $s = $self);
+    return $self->current_form_future->then(sub($form) {
+        return $s->get_set_value_future(
+            name => $name,
+            value => $value,
+            pre => $pre,
+            post => $post,
+            index => $index,
+            node => $form,
+        );
+    });
 }
 
 =head2 C<< $mech->sendkeys( %options ) >>
@@ -5592,6 +5604,7 @@ sub value {
 
 sub value_future {
     my $self = shift;
+    weaken(my $s = $self);
     if (@_ == 2) {
         my ($name,$index) = @_;
 
@@ -5599,19 +5612,23 @@ sub value_future {
             $self->signal_condition("Non-numeric index passed to ->value(). Did you mean to call ->field('$name' => '$index') ?");
         };
 
-        return $self->get_set_value_future(
-            node => $self->current_form,
-            index => $index,
-            name => $name,
-        );
+        return $self->current_form_future->then(sub($form) {
+            return $s->get_set_value_future(
+                node => $form,
+                index => $index,
+                name => $name,
+            );
+        });
 
     } else {
         my ($name,%options) = @_;
-        return $self->get_set_value_future(
-            node => $self->current_form,
-            %options,
-            name => $name,
-        );
+        return $self->current_form_future->then(sub($form) {
+            return $s->get_set_value_future(
+                node => $form,
+                %options,
+                name => $name,
+            );
+        });
     };
 };
 
@@ -5763,7 +5780,7 @@ JS
         } elsif( 'checked' eq $method ) {
             if (defined $value) {
                 $value = [ $value ] unless ref $value;
-                $obj->set_attribute('checked' => JSON::true);
+                return $obj->set_attribute_future('checked' => JSON::true);
             }
         } elsif( 'content' eq $method ) {
             return $self->target->send_message('Runtime.callFunctionOn',
@@ -6157,28 +6174,30 @@ sub submit($self,$dom_form = $self->current_form) {
 }
 
 sub submit_future($self,$dom_form = undef) {
-    $dom_form ||= $self->current_form;
-    if ($dom_form) {
-        # We should prepare for navigation here as well
-        # The __proto__ invocation is so we can have a HTML form field entry
-        # named "submit"
+    weaken(my $s = $self);
+    my $form_f = $dom_form ? Future->done($dom_form) : $self->current_form_future;
+    return $form_f->then(sub($dom_form) {
+        if ($dom_form) {
+            # We should prepare for navigation here as well
+            # The __proto__ invocation is so we can have a HTML form field entry
+            # named "submit"
 
-        weaken(my $s = $self);
-        return $dom_form->objectId_future->then(sub($id) {
-            return $s->_mightNavigate( sub {
-                $s->target->send_message(
-                    'Runtime.callFunctionOn',
-                    objectId => $id,
-                    functionDeclaration => 'function() { var action = this.action; var isCallable = action && typeof(action) === "function"; if( isCallable) { action() } else { this.__proto__.submit.apply(this) }}'
-                );
+            return $dom_form->objectId_future->then(sub($id) {
+                return $s->_mightNavigate( sub {
+                    $s->target->send_message(
+                        'Runtime.callFunctionOn',
+                        objectId => $id,
+                        functionDeclaration => 'function() { var action = this.action; var isCallable = action && typeof(action) === "function"; if( isCallable) { action() } else { this.__proto__.submit.apply(this) }}'
+                    );
+                });
+            })->then(sub {
+                $s->invalidate_cached_values;
+                return Future->done($s->response);
             });
-        })->then(sub {
-            $s->invalidate_cached_values;
-            return Future->done($s->response);
-        });
-    } else {
-        croak "I don't know which form to submit, sorry.";
-    }
+        } else {
+            croak "I don't know which form to submit, sorry.";
+        }
+    });
 };
 
 =head2 C<< $mech->submit_form( %options ) >>
