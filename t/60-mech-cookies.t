@@ -32,7 +32,7 @@ sub new_mech {
     );
 };
 
-my $server = Test::HTTP::LocalServer->spawn;
+my $server = t::helper->safe_server;
 
 t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
     my ($browser_instance, $mech) = @_;

@@ -328,7 +328,7 @@ sub safe_value {
     if (ref $args[-1] eq 'HASH') {
         %options = %{pop @args};
     }
-    my $timeout = delete $options{timeout} || ($is_slow ? 15 : 5);
+    my $timeout = delete $options{timeout} || ($is_slow ? 30 : 5);
     my $name = shift @args;
     my $index = shift @args;
 
@@ -361,7 +361,7 @@ sub safe_field {
     if (@args and ref $args[-1] eq 'HASH') {
         %options = %{pop @args};
     }
-    my $timeout = delete $options{timeout} || ($is_slow ? 15 : 5);
+    my $timeout = delete $options{timeout} || ($is_slow ? 30 : 5);
     my $index = shift @args;
 
     my $start = Time::HiRes::time();
@@ -383,7 +383,7 @@ sub safe_field {
 
 sub safe_set_fields {
     my ($mech, %fields) = @_;
-    my $timeout = 15;
+    my $timeout = ($is_slow ? 30 : 15);
     my $start = Time::HiRes::time();
     my $call_f = $mech->set_fields_future(%fields);
     my $timeout_f = $mech->sleep_future($timeout)->then(sub { Future->fail("Timeout during set_fields") });
@@ -1123,19 +1123,23 @@ sub set_watchdog {
         # If main process dies, killer's read returns 0 and it exits.
         # If killer's alarm hits, it kills the main process.
         
-        my $cmd = 'perl -MIO::Socket::INET -e ' . chr(34) .
-                  '$SIG{ALRM} = sub { ' .
-                  '  print STDERR qq{\nWatchdog firing for ' . $target_pid . ' after ' . $timeout_s . ' s\n}; ' .
-                  '  system(qq{ssh -i C:/Users/dev.AD2/.ssh/id_rsa -o StrictHostKeyChecking=no administrator@100.64.79.66 \"taskkill /F /T /PID ' . $target_pid . '\"}); ' .
-                  '  kill(9, ' . $target_pid . '); ' .
-                  '  exit ' .
-                  '}; ' .
-                  'alarm(' . $timeout_s . '); ' .
-                  'my $s = IO::Socket::INET->new(PeerAddr=>' . chr(39) . '127.0.0.1' . chr(39) . ', PeerPort=>' . $port . '); ' .
-                  'if ($s) { $s->read(my $buf, 1); } ' .
-                  'exit;' . chr(34);
-        
-        if (my $kpid = system(1, $cmd)) {
+        my $script = <<PERL;
+\$SIG{ALRM} = sub {
+    print STDERR "\\nWatchdog firing for $target_pid after $timeout_s s\\n";
+    system(q{ssh -i C:/Users/dev.AD2/.ssh/id_rsa -o StrictHostKeyChecking=no administrator\@100.64.79.66 "taskkill /F /T /PID $target_pid"});
+    kill(9, $target_pid);
+    exit;
+};
+alarm($timeout_s);
+require IO::Socket::INET;
+my \$s = IO::Socket::INET->new(PeerAddr=>'127.0.0.1', PeerPort=>$port);
+if (\$s) {
+    \$s->read(my \$buf, 1);
+}
+exit;
+PERL
+
+        if (system(1, 'perl', '-e', $script)) {
             # Killer spawned
         }
         $watchdog_socket = $listener; # Keep it alive to keep the connection

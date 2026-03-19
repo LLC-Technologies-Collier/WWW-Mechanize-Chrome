@@ -21,7 +21,7 @@ if( $^O !~ /mswin/i ) {
 Log::Log4perl->easy_init($ERROR);
 
 
-my $server = Test::HTTP::LocalServer->spawn(
+my $server = t::helper->safe_server(
     #debug => 1
 );
 my $url = $server->url;
