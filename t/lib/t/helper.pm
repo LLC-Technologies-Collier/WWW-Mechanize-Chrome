@@ -1124,15 +1124,15 @@ sub set_watchdog {
         # If killer's alarm hits, it kills the main process.
         
         my $cmd = "perl -MIO::Socket::INET -e \" " .
-                  "\\\$SIG{ALRM} = sub { " .
+                  "\$SIG{ALRM} = sub { " .
                   "  print STDERR qq{\\nWatchdog firing for $target_pid after $timeout_s s\\n}; " .
                   "  system(qq{ssh -i C:/Users/dev.AD2/.ssh/id_rsa -o StrictHostKeyChecking=no administrator\\\@100.64.79.66 \\\"taskkill /F /T /PID $target_pid\\\"}); " .
                   "  kill(9, $target_pid); " .
                   "  exit " .
                   "}; " .
                   "alarm($timeout_s); " .
-                  "my \\\$s = IO::Socket::INET->new(PeerAddr=>'127.0.0.1', PeerPort=>$port); " .
-                  "if (\\\$s) { \\\$s->read(my \\\$buf, 1); } " .
+                  "my \$s = IO::Socket::INET->new(PeerAddr=>'127.0.0.1', PeerPort=>$port); " .
+                  "if (\$s) { \$s->read(my \$buf, 1); } " .
                   "exit;\"";
         
         if (my $kpid = system(1, $cmd)) {

@@ -6316,11 +6316,13 @@ sub is_visible_future {
         $query_f = Future->done($options{dom});
     };
     
-    return $query_f->then(sub($node) {
+    return $query_f->then(sub {
+        my ($node) = @_;
         if (! $node) {
             return Future->done(undef);
         };
-        return $node->objectId_future->then(sub($id) {
+        return $node->objectId_future->then(sub {
+            my ($id) = @_;
             return $s->callFunctionOn_future(<<'JS', objectId => $id, arguments => []);
     function ()
     {
@@ -6363,7 +6365,8 @@ sub is_visible_future {
         return false
     }
 JS
-        })->then(sub($val, $type) {
+        })->then(sub {
+            my ($val, $type) = @_;
             $type eq 'boolean'
                 or die "Don't know how to handle Javascript type '$type'";
             return Future->done($val);
@@ -6452,11 +6455,13 @@ sub wait_until_invisible_future {
             $node_f = Future->done($options{dom});
         };
         
-        $node_f->then(sub($node) {
+        $node_f->then(sub {
+            my ($node) = @_;
             if (! $node) {
                 return Future->done(1);
             };
-            return $s->is_visible_future($node)->then(sub($v) {
+            return $s->is_visible_future($node)->then(sub {
+                my ($v) = @_;
                 if (! $v) {
                     return Future->done(1);
                 };
@@ -6470,7 +6475,8 @@ sub wait_until_invisible_future {
                 return $s->sleep_future($sleep)->then(sub { Future->done(undef) });
             });
         });
-    } while => sub($f) {
+    } while => sub {
+        my ($f) = @_;
         my $res = eval { $f->get };
         if ($@) { return 0 }; # Stop on failure
         return ! $res; # Continue if result is not true (element still visible)
@@ -6528,7 +6534,8 @@ sub wait_until_visible_future {
     
     weaken(my $s = $self);
     return repeat {
-        $s->_option_query_future(%options)->then(sub(@found) {
+        $s->_option_query_future(%options)->then(sub {
+            my (@found) = @_;
             # Check visibility of found nodes
             if (! @found) {
                 if ($timeout and time >= $timeout_after) {
@@ -6555,7 +6562,8 @@ sub wait_until_visible_future {
                 return $s->sleep_future($sleep)->then(sub { Future->done(undef) });
             });
         });
-    } while => sub($f) {
+    } while => sub {
+        my ($f) = @_;
         my $res = eval { $f->get };
         if ($@) { return 0 };
         return ! $res;
