@@ -72,7 +72,7 @@ t::helper::run_across_instances(\@instances, \&new_mech, 4*@files+5, sub {
         $mech->allow('javascript' => 1);
         ok !$mech->is_visible(selector => '#retry'), "The element is invisible";
         my $finished = eval {
-            $mech->wait_until_visible(selector => '#retry', timeout => 1);
+            $mech->wait_until_visible(selector => '#retry', timeout => ($t::helper::is_slow ? 10 : 1));
             1;
         };
         is $finished, undef, "We got an exception";
