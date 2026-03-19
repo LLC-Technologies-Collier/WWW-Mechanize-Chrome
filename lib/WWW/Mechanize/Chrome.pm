@@ -4864,7 +4864,10 @@ sub xpath_future( $self, $query, %options) {
             );
         });
     })->then( sub {
-        my @found = map { my @r = $_->get; @r ? map { $_->get } @r : () } @_;
+        my @found = map { 
+            my @r = $_->get; 
+            @r ? map { (blessed($_) && $_->isa('Future')) ? $_->get : $_ } @r : () 
+        } @_;
         push @res, @found;
 
         if (! $zero_allowed and @res == 0) {
@@ -6409,7 +6412,7 @@ sub is_visible_future {
         };
         return $node->objectId_future->then(sub {
             my ($id) = @_;
-            return $s->callFunctionOn_future(<<'JS', objectId => $id, arguments => []);
+            return $s->callFunctionOn_future(<<'JS', objectId => $id, arguments => [])
     function ()
     {
         var obj = this;
@@ -6451,11 +6454,9 @@ sub is_visible_future {
         return false
     }
 JS
-        })->then(sub {
-            my ($val, $type) = @_;
-            $type eq 'boolean'
-                or die "Don't know how to handle Javascript type '$type'";
-            return Future->done($val);
+            ->then(sub($val, $type) {
+                return Future->done( $val );
+            });
         });
     });
 };
