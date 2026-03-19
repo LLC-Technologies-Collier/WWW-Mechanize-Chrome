@@ -5704,8 +5704,11 @@ sub set_field_future($self, %options ) {
 
     weaken(my $s = $self);
     return $obj->get_tag_name_future()->then(sub($tag) {
+        warn "DEBUG: tag: $tag\n" if $ENV{TEST_VERBOSE};
         return $obj->get_attribute_future('type', live => 1)->then(sub($type) {
+            warn "DEBUG: type: " . ($type // '') . "\n" if $ENV{TEST_VERBOSE};
             return $obj->objectId_future()->then(sub($id) {
+                warn "DEBUG: id: " . ($id // '') . "\n" if $ENV{TEST_VERBOSE};
                 $type //= '';
 
                 my %method = (
@@ -5723,6 +5726,7 @@ sub set_field_future($self, %options ) {
                 };
 
                 # Send pre-change events:
+                warn "DEBUG: pre-events: @$pre\n" if $ENV{TEST_VERBOSE};
                 my @pre_f;
                 for my $ev (@$pre) {
                     push @pre_f, $s->target->send_message(
@@ -5743,6 +5747,7 @@ JS
                 };
 
                 return Future->wait_all( @pre_f )->then(sub {
+                    warn "DEBUG: set-value: $value\n" if $ENV{TEST_VERBOSE};
                     if( 'value' eq $method ) {
                         return $s->target->send_message('DOM.setAttributeValue', nodeId => 0+$obj->nodeId, name => 'value', value => "$value" );
 
@@ -5791,6 +5796,7 @@ JS
                     return Future->done();
                 })->then(sub {
                     # Send post-change events:
+                    warn "DEBUG: post-events: @$post\n" if $ENV{TEST_VERBOSE};
                     my @post_f;
                     for my $ev (@$post) {
                         push @post_f, $s->target->send_message(
@@ -5882,7 +5888,9 @@ sub get_set_value_future($self,%options) {
             # dropdowns by not enumerating all options
             weaken(my $s = $self);
             return $obj->get_tag_name_future()->then(sub($tag) {
+                warn "DEBUG: tag: $tag\n" if $ENV{TEST_VERBOSE};
                 return $obj->objectId_future()->then(sub($id) {
+                    warn "DEBUG: id: " . ($id // '') . "\n" if $ENV{TEST_VERBOSE};
 
                 if ('SELECT' eq uc $tag) {
                     if( ! $id ) {
