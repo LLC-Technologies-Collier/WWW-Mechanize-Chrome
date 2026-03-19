@@ -5889,13 +5889,8 @@ sub get_set_value_future($self,%options) {
             # We could save some work here for the simple case of single-select
             # dropdowns by not enumerating all options
             weaken(my $s = $self);
-            return Future->wait_all(
-                $obj->get_tag_name_future(),
-                $obj->objectId_future(),
-            )->then(sub {
-                my ($tag_f, $id_f) = @_;
-                my $tag = $tag_f->get;
-                my $id = $id_f->get;
+            return $obj->get_tag_name_future()->then(sub($tag) {
+                return $obj->objectId_future()->then(sub($id) {
 
                 if ('SELECT' eq uc $tag) {
                     if( ! $id ) {
@@ -5926,6 +5921,7 @@ JS
                 return $obj->get_attribute_future('value', live => 1);
             };
         });
+    });
     });
     } else {
         return Future->done();
