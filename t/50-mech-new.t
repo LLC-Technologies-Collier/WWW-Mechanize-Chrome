@@ -114,10 +114,10 @@ t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
         %args,
     );
     is $mech->{pid}, undef, "We didn't start a new process when reusing a pre-existing transport";
-    $mech->update_html(<<HTML);
+    t::helper::safe_update_html($mech, <<HTML);
     <html><head><title>$magic</title></head><body>Test</body></html>
 HTML
-    my $c = $mech->content;
+    my $c = t::helper::safe_content($mech);
     like $c, qr/\Q$magic/, "We can read our content back immediately";
 
     undef $mech;
@@ -133,7 +133,7 @@ HTML
         %args,
     );
     is $mech->{pid}, undef, "We didn't start a new process when reusing a pre-existing transport";
-    $c = $mech->content;
+    $c = t::helper::safe_content($mech);
     like $c, qr/\Q$magic/, "We selected the existing tab"
         or do { diag $_->{title} for $mech->driver->getTargets()->get };
 
@@ -156,8 +156,8 @@ HTML
     );
     is $mech->{pid}, undef, "We didn't start a new process when reusing a pre-existing transport";
 #is $mech->{pid}, undef, "We didn't start a new process when connecting to the current tab";
-    $c = $mech->content;
-    like $mech->content, qr/\Q$magic/, "We connected to the current tab"
+    $c = t::helper::safe_content($mech);
+    like t::helper::safe_content($mech), qr/\Q$magic/, "We connected to the current tab"
         or do { diag $_->{title} for $mech->driver->getTargets()->get() };
     $mech->autoclose_tab(1);
 
@@ -190,4 +190,8 @@ HTML
         WWW::Mechanize::Chrome->kill_child('SIGKILL', $pid, undef);
     };
     };
+
+    note "End of test sub for $file";
 });
+
+alarm(0);

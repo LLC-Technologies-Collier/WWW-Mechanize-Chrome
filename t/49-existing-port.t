@@ -123,11 +123,7 @@ t::helper::run_across_instances(\@instances, \&new_mech, $test_count, sub {
     note "End of test sub for $browser_instance";
 });
 
-if( $^O =~ /mswin/i ) {
-    alarm(0);
-} else {
-    alarm(0);
-}
+alarm(0);
 
 undef $existing_mech;
 

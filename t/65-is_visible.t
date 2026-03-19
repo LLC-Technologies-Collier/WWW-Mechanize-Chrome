@@ -52,14 +52,17 @@ sub new_mech {
 
 t::helper::run_across_instances(\@instances, \&new_mech, 12*@files+5, sub {
     my ($browser_instance, $mech) = @_;
+
+    t::helper::set_watchdog(30);
+
     isa_ok $mech, 'WWW::Mechanize::Chrome';
 
     # Check that we can execute JS
-    $mech->get_local($files[0]);
+    t::helper::safe_get_local($mech, $files[0]);
     $mech->allow('javascript' => 1);
     my ($triggered,$type,$ok);
     eval {
-        ($triggered, $type) = $mech->eval_in_page('timer');
+        ($triggered, $type) = t::helper::safe_eval_in_page($mech, 'timer');
         $ok = 1;
     };
     if (! $triggered) {
@@ -71,7 +74,7 @@ t::helper::run_across_instances(\@instances, \&new_mech, 12*@files+5, sub {
 
     # Check that we can trigger the timeout
     for my $file ($files[0]) {
-        $mech->get_local($file);
+        t::helper::safe_get_local($mech, $file);
         is $mech->title, $file, "We loaded the right file ($file)";
         $mech->allow('javascript' => 1);
         ok $mech->is_visible(selector => '#before'), "The element is visible";
@@ -84,17 +87,17 @@ t::helper::run_across_instances(\@instances, \&new_mech, 12*@files+5, sub {
     };
 
     for my $file (@files) {
-        $mech->get_local($file);
+        t::helper::safe_get_local($mech, $file);
         is $mech->title, $file, "We loaded the right file ($file)";
         $mech->allow('javascript' => 1);
-        my ($timer,$type) = $mech->eval_in_page('timer');
+        my ($timer,$type) = t::helper::safe_eval_in_page($mech, 'timer');
         #(my ($window),$type) = $mech->eval_in_page('window');
         #$window = $mech->tab->{linkedBrowser}->{contentWindow};
 
         ok $mech->is_visible(selector => 'body'), "We can see the body";
 
         if(! ok !$mech->is_visible(selector => '#standby'), "We can't see #standby") {
-            my $standby = $mech->by_id('standby', single=>1);
+            my $standby = t::helper::safe_by_id($mech, 'standby', single=>1);
             my $style = $standby->{style};
             diag "style.visibility          <" . $style->{visibility} . ">";
             diag "style.display             <" . $style->{display} . ">";
@@ -103,7 +106,7 @@ t::helper::run_across_instances(\@instances, \&new_mech, 12*@files+5, sub {
             diag "computed-style.display    <" . $style->{display} . ">";
         };
         ok !$mech->is_visible(selector => '.status', any => 1), "We can't see .status even though there exist multiple such elements";
-        $mech->click({ selector => '#start', synchronize => 0 });
+        t::helper::safe_click($mech, { selector => '#start', synchronize => 0 });
 
         my $timeout = time+2;
         while( time < $timeout and !$mech->is_visible(selector => '#standby')) {
@@ -117,7 +120,7 @@ t::helper::run_across_instances(\@instances, \&new_mech, 12*@files+5, sub {
         };
         is $ok, 1, "No timeout" or diag $@;
         if(! ok( !$mech->is_visible(selector => '#standby'), "The #standby is invisible")) {
-            my $standby = $mech->by_id('standby', single=>1);
+            my $standby = t::helper::safe_by_id($mech, 'standby', single=>1);
             my $style = $standby->{style};
             diag "style.visibility          <" . $style->{visibility} . ">";
             diag "style.display             <" . $style->{display} . ">";
@@ -127,13 +130,13 @@ t::helper::run_across_instances(\@instances, \&new_mech, 12*@files+5, sub {
         };
 
         # Now test with plain text
-        $mech->get_local($file);
+        t::helper::safe_get_local($mech, $file);
         is $mech->title, $file, "We loaded the right file ($file)";
         $mech->allow('javascript' => 1);
-        ($timer,$type) = $mech->eval_in_page('timer');
+        ($timer,$type) = t::helper::safe_eval_in_page($mech, 'timer');
 
         if(! ok( !$mech->is_visible(xpath => '//*[contains(text(),"stand by")]'), "We can't see the standby message (via its text)")) {
-            my $standby = $mech->by_id('standby', single=>1);
+            my $standby = t::helper::safe_by_id($mech, 'standby', single=>1);
             my $style = $standby->{style};
             diag "style.visibility          <" . $style->{visibility} . ">";
             diag "style.display             <" . $style->{display} . ">";
@@ -142,7 +145,7 @@ t::helper::run_across_instances(\@instances, \&new_mech, 12*@files+5, sub {
             diag "computed-style.display    <" . $style->{display} . ">";
         };
 
-        $mech->click({ selector => '#start', synchronize => 0 });
+        t::helper::safe_click($mech, { selector => '#start', synchronize => 0 });
 
         # Busy-wait
         $timeout = time+2;
@@ -151,7 +154,7 @@ t::helper::run_across_instances(\@instances, \&new_mech, 12*@files+5, sub {
         };
 
         if(! ok $mech->is_visible(xpath => '//*[contains(text(),"stand by")]'), "We can see the standby message (via its text)") {
-            my $standby = $mech->by_id('standby', single=>1);
+            my $standby = t::helper::safe_by_id($mech, 'standby', single=>1);
             my $style = $standby->{style};
             diag "style.visibility          <" . $style->{visibility} . ">";
             diag "style.display             <" . $style->{display} . ">";
@@ -166,10 +169,10 @@ t::helper::run_across_instances(\@instances, \&new_mech, 12*@files+5, sub {
         };
         if(! is $ok, 1, "No timeout") {
             diag $@;
-            for ($mech->xpath('//*[contains(text(),"stand by")]')) {
+            for (t::helper::safe_xpath($mech, '//*[contains(text(),"stand by")]')) {
                 diag $_->{tagName}, $_->{innerHTML};
             };
-            my $standby = $mech->xpath('//*[contains(text(),"stand by")]', single=>1);
+            my $standby = t::helper::safe_xpath($mech, '//*[contains(text(),"stand by")]', single=>1);
             my $style = $standby->{style};
             diag "style.visibility          <" . $style->{visibility} . ">";
             diag "style.display             <" . $style->{display} . ">";
@@ -179,4 +182,8 @@ t::helper::run_across_instances(\@instances, \&new_mech, 12*@files+5, sub {
         };
         ok !$mech->is_visible(selector => '#standby'), "The #standby is invisible";
     };
+
+    note "End of test sub for $browser_instance";
 });
+
+alarm(0);

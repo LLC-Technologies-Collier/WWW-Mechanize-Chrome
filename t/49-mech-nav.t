@@ -38,26 +38,27 @@ my $server = Test::HTTP::LocalServer->spawn(
 
 t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
     my( $file, $mech ) = splice @_; # so we move references
+    t::helper::set_watchdog(60);
 
-    $mech->get($server->url);
+    t::helper::safe_get($mech, $server->url);
 
-    $mech->click_button(number => 1);
+    t::helper::safe_click_button($mech, number => 1);
     like( $mech->uri, qr/formsubmit/, 'Clicking on button by number' );
     my $last = $mech->uri;
 
-    $mech->back;
+    t::helper::safe_back($mech);
     is $mech->uri, $server->url, 'We went back';
 
-    $mech->forward;
+    t::helper::safe_forward($mech);
 
     is $mech->uri, $last, 'We went forward';
 
     my $version = $mech->chrome_version;
     SKIP: {
         #if( $version =~ /\b(\d+)\b/ and $1 < 66 ) {
-            $mech->reload;
+            t::helper::safe_reload($mech);
             is $mech->uri, $last, 'We reloaded';
-            $mech->reload( ignoreCache => 1 );
+            t::helper::safe_reload($mech, ignoreCache => 1 );
             is $mech->uri, $last, 'We reloaded, ignoring the cache';
         #} else {
         #    skip "Chrome v66+ doesn't know how to reload without hanging in a dialog box", 1;
@@ -65,4 +66,5 @@ t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
     };
 });
 $server->stop;
+alarm(0);
 

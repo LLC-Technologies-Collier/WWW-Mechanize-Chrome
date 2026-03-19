@@ -41,7 +41,7 @@ sub load_file_ok {
              );
     #$mech->allow(@options);
     #diag "Loading $fn";
-    $mech->get_local($fn);
+    t::helper::safe_get_local($mech, $fn);
     ok $mech->success, "Loading $htmlfile is considered a success";
     is $mech->title, $htmlfile, "We loaded the right file (@options)"
         or diag $mech->content;
@@ -50,7 +50,7 @@ sub load_file_ok {
 t::helper::run_across_instances(\@instances, \&new_mech, 4, sub {
     my ($browser_instance, $mech) = @_;
 
-    t::helper::set_watchdog(30);
+    t::helper::set_watchdog(60);
 
     isa_ok $mech, 'WWW::Mechanize::Chrome';
 
@@ -70,11 +70,12 @@ t::helper::run_across_instances(\@instances, \&new_mech, 4, sub {
 
     load_file_ok($mech, '58-alert.html', javascript => 1);
 
-    # Wait up to 10s for both alerts to arrive
+    # Wait up to 20s for both alerts to arrive
     my $wait_start = time;
-    eval { $alert_f->within(10)->get };
+    my $timeout_f = $mech->sleep_future(20)->then(sub { Future->fail("Timed out waiting for alerts") });
+    eval { Future->wait_any($alert_f, $timeout_f)->get };
     if ($@) {
-        note "Timed out waiting for alerts after " . (time - $wait_start) . "s";
+        note "Alert wait finished after " . (time - $wait_start) . "s: $@";
     }
 
     is 0+@alerts, 2, "got two alerts"
@@ -82,3 +83,5 @@ t::helper::run_across_instances(\@instances, \&new_mech, 4, sub {
 
     undef $mech;
 });
+
+alarm(0);

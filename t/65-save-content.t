@@ -48,6 +48,9 @@ my @test_urls = ($server->url);
 
 t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
     my ($browser_instance, $mech) = @_;
+
+    t::helper::set_watchdog(60);
+
     my $version = $mech->chrome_version;
 
     if( $version =~ /\b(\d+)\b/ and $1 < 60 ) {
@@ -73,7 +76,7 @@ t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
 
     #my $base_url = 'https://corion.net/econsole/';
     #my $base_url = 'https://corion.net/';
-    $mech->get($base_url);
+    t::helper::safe_get($mech, $base_url);
     my $page_file = File::Spec->catfile($topdir, "test page.html");
     my $r = $mech->saveResources_future(
         target_file => $page_file,
@@ -107,6 +110,10 @@ t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
 
     };
 
+    note "End of test sub for $browser_instance";
 });
+
+alarm(0);
+
 $server->stop;
 

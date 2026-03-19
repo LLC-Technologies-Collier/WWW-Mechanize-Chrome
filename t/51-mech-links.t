@@ -47,10 +47,12 @@ t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
     my ($browser_instance, $mech) = @_;
     isa_ok $mech, 'WWW::Mechanize::Chrome';
 
-    $mech->get_local('51-mech-links-nobase.html');
+    t::helper::set_watchdog(60);
+
+    t::helper::safe_get_local($mech, '51-mech-links-nobase.html');
     $mech->sleep(0.5); # Wait for DOM to stabilize (iframes loading)
 
-    my @found_links = $mech->links;
+    my @found_links = t::helper::safe_links($mech);
     # There is a FRAME tag, but FRAMES are exclusive elements
     # so Chrome ignores it while WWW::Mechanize picks it up
     if (! is scalar @found_links, 6, 'All 6 links were found') {
@@ -58,10 +60,10 @@ t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
             for @found_links;
     };
 
-    $mech->get_local('51-mech-links-base.html');
+    t::helper::safe_get_local($mech, '51-mech-links-base.html');
     $mech->sleep(0.5); # Wait for DOM to stabilize
 
-    @found_links = $mech->links;
+    @found_links = t::helper::safe_links($mech);
     SKIP: {
         my $version = $mech->chrome_version;
 
@@ -87,16 +89,16 @@ t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
 
     # There is a FRAME tag, but FRAMES are exclusive elements
     # so Firefox ignores it while WWW::Mechanize picks it up
-    my @frames = $mech->selector('frame');
+    my @frames = t::helper::safe_selector($mech, 'frame');
     is @frames, 0, "FRAME tag"
         or diag $mech->content;
 
-    @frames = $mech->selector('iframe');
+    @frames = t::helper::safe_selector($mech, 'iframe');
     is @frames, 1, "IFRAME tag";
 
-    $mech->get_local('html5.html');
+    t::helper::safe_get_local($mech, 'html5.html');
     @found_links = map {[$_->url,$_->text]}
-                   grep { $_->url } $mech->links;
+                   grep { $_->url } t::helper::safe_links($mech);
     is_deeply \@found_links, [
         ['http://www.example.com/1', 'One'],
         ['http://www.example.com/5', 'Five'],
@@ -109,10 +111,10 @@ t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
         # Resolved in WMC via JS fallback search and XHTML-aware update_html
         my $file = 't/xhtml.xhtml';
         my $html = do { open my $fh, '<', $file or die "$file: $!"; local $/; <$fh> };
-        $mech->update_html($html);
-        #$mech->get_local('xhtml.xhtml'); # this still fails
+        t::helper::safe_update_html($mech, $html);
+        #t::helper::safe_get_local($mech, 'xhtml.xhtml'); # this still fails
         @found_links = map {[$_->url,$_->text]}
-                   grep { $_->url } $mech->links;
+                   grep { $_->url } t::helper::safe_links($mech);
         is_deeply \@found_links, [
             ['http://www.example.com/1', 'One'],
             ['http://www.example.com/5', 'Five'],
@@ -120,3 +122,5 @@ t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
         ], "We parse nasty XHTML";
     };
 });
+
+alarm(0);

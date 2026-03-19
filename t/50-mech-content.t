@@ -55,7 +55,7 @@ t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
         my $mhtml = t::helper::safe_content($mech, format => 'mhtml' );
         like $mhtml, qr/^Snapshot-Content-Location:/m, "We can get the MHTML of the whole page";
 
-        $mech->get_local('52-frameset.html');
+        t::helper::safe_get_local($mech, '52-frameset.html');
         $mhtml = t::helper::safe_content($mech, format => 'mhtml' );
         like $mhtml, qr!<title>52-subframe.html</title>!, "We can get the MHTML of the whole page, including frames";
     };
@@ -66,13 +66,15 @@ t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
 
     {
         local $TODO = "Chrome devtools doesn't return the XML declaration of a document";
-        $mech->get_local('xhtml.xhtml');
+        t::helper::safe_get_local($mech, 'xhtml.xhtml');
         $html = t::helper::safe_content($mech);
         like $html, qr/^<?xml\b/, "->content preserves the XHTML directive";
     }
 
     # pm11123357
-    $mech->get_local('scripttag.html');
+    t::helper::safe_get_local($mech, 'scripttag.html');
     $text = t::helper::safe_content($mech, format => 'text' );
     like $text, qr/^\s*This should appear.\s+This should also appear.\s*$/, "<script> tag contents are not included in text";
 });
+
+alarm(0);

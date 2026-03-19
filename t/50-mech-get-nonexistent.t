@@ -36,12 +36,13 @@ my $server = Test::HTTP::LocalServer->spawn(
 
 t::helper::run_across_instances(\@instances, \&new_mech, 4, sub {
     my ($browser_instance, $mech) = @_;
+    t::helper::set_watchdog(60);
 
     isa_ok $mech, 'WWW::Mechanize::Chrome';
 
     my ($site,$estatus) = ('https://nonexistent.example/',200);
 
-    my $res = $mech->get($site);
+    my $res = t::helper::safe_get($mech, $site);
     isa_ok $res, 'HTTP::Response', "Response";
 	cmp_ok $res->code, '>=', 500,
 	    "An error gets reported as error";
@@ -50,3 +51,4 @@ t::helper::run_across_instances(\@instances, \&new_mech, 4, sub {
 });
 
 $server->stop;
+alarm(0);
