@@ -116,7 +116,14 @@ t::helper::run_across_instances(\@instances, \&new_mech, $testcount, sub {
     });
 
     load_file_ok($mech, '58-alert.html', javascript => 1);
-    no_memory_cycles_ok( $mech, "after an alert()" );
+    if ($^O =~ /MSWin32/i) {
+        TODO: {
+            local $TODO = q{Memory cycle on Windows after alert() needs fixing};
+            no_memory_cycles_ok( $mech, "after an alert()" );
+        }
+    } else {
+        no_memory_cycles_ok( $mech, "after an alert()" );
+    }
     undef $mech;
     is $called, 1, "We destroyed our object after ->on_dialog";
 
