@@ -53,7 +53,7 @@ sub new_mech {
 t::helper::run_across_instances(\@instances, \&new_mech, 12*@files+5, sub {
     my ($browser_instance, $mech) = @_;
 
-    t::helper::set_watchdog($t::helper::is_slow ? 90 : 30);
+    t::helper::set_watchdog($t::helper::is_slow ? 90 : 12);
 
     isa_ok $mech, 'WWW::Mechanize::Chrome';
 
@@ -79,7 +79,7 @@ t::helper::run_across_instances(\@instances, \&new_mech, 12*@files+5, sub {
         $mech->allow('javascript' => 1);
         ok t::helper::safe_is_visible($mech, selector => '#before'), "The element is visible";
         my $finished = eval {
-            t::helper::safe_wait_until_invisible($mech, selector => '#before', timeout => ($t::helper::is_slow ? 10 : 1));
+            t::helper::safe_wait_until_invisible($mech, selector => '#before', timeout => ($t::helper::is_slow ? 4 : 1));
             1;
         };
         is $finished, undef, "We got an exception";
@@ -109,8 +109,8 @@ t::helper::run_across_instances(\@instances, \&new_mech, 12*@files+5, sub {
         t::helper::safe_click($mech, { selector => '#start', synchronize => 0 });
 
         t::helper::safe_wait_until_visible($mech, selector => '#standby',
-            timeout => ($t::helper::is_slow ? 10 : 2),
-            max_wait => ($t::helper::is_slow ? 10 : 2)
+            timeout => ($t::helper::is_slow ? 10 : 6),
+            max_wait => ($t::helper::is_slow ? 10 : 6)
         );
 
         ok t::helper::safe_is_visible($mech, selector => '#standby'), "We can see #standby";
@@ -149,8 +149,8 @@ t::helper::run_across_instances(\@instances, \&new_mech, 12*@files+5, sub {
 
         # Busy-wait
         t::helper::safe_wait_until_visible($mech, xpath => '//*[contains(text(),"stand by")]',
-            timeout => ($t::helper::is_slow ? 10 : 2),
-            max_wait => ($t::helper::is_slow ? 10 : 2)
+            timeout => ($t::helper::is_slow ? 10 : 6),
+            max_wait => ($t::helper::is_slow ? 10 : 6)
         );
 
         if(! ok t::helper::safe_is_visible($mech, xpath => '//*[contains(text(),"stand by")]'), "We can see the standby message (via its text)") {

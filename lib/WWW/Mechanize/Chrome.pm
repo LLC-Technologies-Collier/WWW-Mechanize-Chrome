@@ -1789,19 +1789,26 @@ A callback for Javascript dialogs (C<< alert() >>, C<< prompt() >>, ... )
 =cut
 
 sub on_dialog( $self, $cb ) {
+    # If we have an old listener, remove it first.
+    if( my $listener = $self->{ on_dialog_listener } ) {
+        $self->remove_listener( $listener );
+        delete $self->{ on_dialog_listener };
+    }
+
+    # If a new callback is provided, add a new listener.
     if( $cb ) {
         my $s = $self;
         weaken $s;
         $self->{ on_dialog_listener } =
         $self->add_listener('Page.javascriptDialogOpening', sub( $ev ) {
-            if( $s->{ on_dialog }) {
-                $s->log('debug', sprintf 'Javascript %s: %s', $ev->{params}->{type}, $ev->{params}->{message});
+            # Check for $s because it's a weak ref and could be gone
+            if( $s && $s->{ on_dialog }) {
                 $s->{ on_dialog }->( $s, $ev->{params} );
             };
         });
-    } else {
-        delete $self->{ on_dialog_listener };
-    };
+    }
+
+    # Store the user's callback.
     $self->{ on_dialog } = $cb;
 }
 
@@ -2181,6 +2188,7 @@ sub kill_child( $self, $signal, $pids, $wait_file ) {
 }
 
 sub DESTROY {
+    $_[0]->on_dialog(undef);
     $_[0]->close();
     %{ $_[0] }= (); # clean out all other held references
 }
@@ -6535,6 +6543,8 @@ sub wait_until_invisible {
     return $self->wait_until_invisible_future(@args)->get;
 }
 
+
+
 sub wait_until_invisible_future {
     my( $self, @args ) = @_;
     my %options;
@@ -6543,7 +6553,7 @@ sub wait_until_invisible_future {
     } else {
         ($self,%options) = @_;
     };
-    my $sleep = delete $options{ sleep } || 0.3;
+    my $sleep = delete $options{ sleep } || 0.15;
     my $timeout = delete $options{ timeout } || 0;
     my $wait = delete $options{ max_wait } || 0;
     $timeout ||= $wait;
@@ -6591,7 +6601,6 @@ sub wait_until_invisible_future {
         return ! $res; # Continue if result is not true (element still visible)
     };
 };
-
 =head2 C<< $mech->wait_until_visible( %options ) >>
 
   $mech->wait_until_visible( selector => 'a.download' );
@@ -6631,7 +6640,7 @@ sub wait_until_visible {
 
 sub wait_until_visible_future {
     my ($self, %options) = @_;
-    my $sleep = delete $options{ sleep } || 0.3;
+    my $sleep = delete $options{ sleep } || 0.15;
     my $timeout = delete $options{ timeout } || 0;
 
     _default_limiter( 'any', \%options );
@@ -6677,7 +6686,7 @@ sub wait_until_visible_future {
         if ($@) { return 0 };
         return ! $res;
     };
-};
+}
 
 =head1 CONTENT RENDERING METHODS
 

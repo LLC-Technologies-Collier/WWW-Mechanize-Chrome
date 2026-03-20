@@ -527,32 +527,16 @@ sub safe_is_visible {
 
 sub safe_wait_until_invisible {
     my ($mech, @args) = @_;
-    my %options;
-    if( @args == 1 and ref $args[0] eq 'HASH' ) {
-        %options = %{ $args[0] };
-    } elsif( @args % 2 == 0 and @args > 0 and not ref $args[0] ) {
-        %options = @args;
-    }
-    my $timeout = delete $options{timeout} || ($is_slow ? 60 : 30);
     my $start = Time::HiRes::time();
-    my $call_f = $mech->wait_until_invisible_future(@args);
-    my $timeout_f = $mech->sleep_future($timeout)->then(sub { Future->fail("Timeout during wait_until_invisible") });
-    my $f = Future->wait_any($call_f, $timeout_f); return _safe_get($f, $start, sprintf('wait_until_invisible()'));
+    my $f = $mech->wait_until_invisible_future(@args);
+    return _safe_get($f, $start, sprintf('wait_until_invisible()'));
 }
 
 sub safe_wait_until_visible {
     my ($mech, @args) = @_;
-    my %options;
-    if( @args == 1 and ref $args[0] eq 'HASH' ) {
-        %options = %{ $args[0] };
-    } elsif( @args % 2 == 0 and @args > 0 and not ref $args[0] ) {
-        %options = @args;
-    }
-    my $timeout = delete $options{timeout} || ($is_slow ? 60 : 30);
     my $start = Time::HiRes::time();
-    my $call_f = $mech->wait_until_visible_future(@args);
-    my $timeout_f = $mech->sleep_future($timeout)->then(sub { Future->fail("Timeout during wait_until_visible") });
-    my $f = Future->wait_any($call_f, $timeout_f); return _safe_get($f, $start, sprintf('wait_until_visible()'));
+    my $f = $mech->wait_until_visible_future(@args);
+    return _safe_get($f, $start, sprintf('wait_until_visible()'));
 }
 
 sub safe_follow_link {
