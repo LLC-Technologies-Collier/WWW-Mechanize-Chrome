@@ -38,11 +38,9 @@ improve PID tracking and ensure more aggressive process termination via SIGKILL.
 
 =cut
 
-use 5.020;
-use feature 'postderef';
-
 # Allow Test::HTTP::LocalServer to run out-of-the-box using default dual-stack [::1] loopback address
 BEGIN {
+    no strict 'refs';
     # Capture the loop from both NetAsync and Pipe::NetAsync transport constructors
     foreach my $class (qw(Chrome::DevToolsProtocol::Transport::NetAsync Chrome::DevToolsProtocol::Transport::Pipe::NetAsync)) {
         eval {
@@ -89,6 +87,9 @@ BEGIN {
     }
 
 }
+
+use 5.020;
+use feature 'postderef';
 use strict;
 use Test::More;
 use File::Glob qw(bsd_glob);
