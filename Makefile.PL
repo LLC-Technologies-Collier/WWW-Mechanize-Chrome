@@ -131,9 +131,10 @@ package MY;
 sub test {
     my $self = shift;
     my $test = $self->SUPER::test(@_);
-    $test =~ s!\$\(TEST_VERBOSE\)!-It/lib $(TEST_VERBOSE)!g;
+    $test =~ s!\$\(FULLPERLRUN\)!\$(FULLPERLRUN) -It/lib!g;
     return $test;
 }
+
 
 package main;
 
